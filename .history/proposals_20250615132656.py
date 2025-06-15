@@ -830,47 +830,6 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                 await db.increment_defined_scenarios(campaign_id)
                 print(f"DEBUG: Incremented defined scenarios count for campaign C#{campaign_id}")
             
-            # Update campaign control panel if it exists
-            if campaign_id:
-                try:
-                    campaign = await db.get_campaign(campaign_id)
-                    if campaign and campaign.get('control_message_id'):
-                        guild = interaction.guild
-                        if guild:
-                            campaign_mgmt_channel_name = utils.CHANNELS.get("campaign_management", "campaign-management")
-                            campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-                            if campaign_mgmt_channel:
-                                try:
-                                    control_message = await campaign_mgmt_channel.fetch_message(campaign['control_message_id'])
-                                    if control_message:
-                                        # Update the control view
-                                        new_control_view = CampaignControlView(campaign_id, interaction.client)
-                                        await new_control_view.rebuild_view()
-                                        
-                                        # Update the embed as well
-                                        updated_campaign = await db.get_campaign(campaign_id)  # Get fresh data
-                                        creator = await guild.fetch_member(updated_campaign['creator_id'])
-                                        embed_title = f"Campaign Management: '{updated_campaign['title']}' (ID: C#{campaign_id})"
-                                        embed_desc = f"**Creator:** {creator.mention if creator else f'ID: {updated_campaign['creator_id']}'}\n"
-                                        embed_desc += f"**Description:** {updated_campaign['description'] or 'Not provided.'}\n"
-                                        embed_desc += f"**Total Scenarios Expected:** {updated_campaign['num_expected_scenarios']}\n"
-                                        embed_desc += f"**Currently Defined:** {updated_campaign['current_defined_scenarios']}"
-                                        
-                                        new_color = discord.Color.green() if updated_campaign['status'] == 'active' else discord.Color.blue()
-                                        updated_embed = discord.Embed(title=embed_title, description=embed_desc, color=new_color)
-                                        updated_embed.add_field(name="Status", value=updated_campaign['status'].title(), inline=True)
-                                        updated_embed.add_field(name="Last Action", value=f"Scenario {scenario_order} defined", inline=False)
-                                        updated_embed.set_footer(text=f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-                                        
-                                        await control_message.edit(embed=updated_embed, view=new_control_view)
-                                        print(f"DEBUG: Updated campaign control panel for C#{campaign_id}")
-                                except discord.NotFound:
-                                    print(f"DEBUG: Campaign control message not found for C#{campaign_id}")
-                                except Exception as e_update_control:
-                                    print(f"ERROR: Failed to update campaign control panel for C#{campaign_id}: {e_update_control}")
-                except Exception as e_get_campaign:
-                    print(f"ERROR: Failed to get campaign data for control panel update C#{campaign_id}: {e_get_campaign}")
-            
             # No admin notification needed since it's auto-approved
 
         else: # Status is 'Voting'
@@ -1313,7 +1272,7 @@ async def _perform_approve_campaign_action(admin_interaction_for_message_edit: d
     if campaign_mgmt_channel:
         control_view = CampaignControlView(campaign_id, bot_instance)
         # Initial update of button states based on current (just approved) campaign state
-        await control_view.rebuild_view()
+        await control_view.update_button_states()
 
         embed_title = f"Campaign Management: '{campaign_data['title']}' (ID: C#{campaign_id})"
         embed_description = f"**Creator:** {creator.mention if creator else f'ID: {campaign_data['creator_id']}'}\n"
@@ -1477,193 +1436,138 @@ class CampaignControlView(discord.ui.View):
         self.campaign_id = campaign_id
         self.bot = bot_instance
 
-        # We'll dynamically add buttons in update_button_states
-        # Store references to buttons for easy access
-        self.scenario_buttons = {}  # scenario_num -> button
-        self.start_button = None
-        self.manage_button = None
-    
-    async def rebuild_view(self):
-        """Completely rebuild the view with current campaign state"""
-        # Clear all existing items
-        self.clear_items()
-        self.scenario_buttons = {}
-        
+        # Button to define the next scenario
+        self.define_scenario_button = discord.ui.Button(
+            label="Define Next Scenario",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"campaign_control_define_scenario_{self.campaign_id}",
+            emoji="📝"
+        )
+        self.define_scenario_button.callback = self.define_scenario_callback
+        self.add_item(self.define_scenario_button)
+
+        # Button to start the campaign or the next scenario
+        self.start_next_button = discord.ui.Button(
+            label="Start Campaign", # Initial label
+            style=discord.ButtonStyle.success,
+            custom_id=f"campaign_control_start_next_{self.campaign_id}",
+            emoji="▶️"
+        )
+        self.start_next_button.callback = self.start_next_callback
+        self.add_item(self.start_next_button)
+
+        # Add more buttons later if needed (e.g., Pause, Archive)
+        # self.update_button_states() # Call a method to set initial button states based on campaign status
+
+    async def update_button_states(self, interaction: Optional[discord.Interaction] = None):
+        """Dynamically update button labels and enabled/disabled states based on campaign state."""
+        # This method now fetches its own campaign data to ensure it's the most current.
+        # The interaction parameter is kept for potential future use if direct message editing is needed from here,
+        # but primary updates happen via _update_control_message in handle_start_campaign_or_next_scenario.
+
         campaign = await db.get_campaign(self.campaign_id)
         if not campaign:
-            # Campaign not found - add error button
-            error_button = discord.ui.Button(
-                label="Campaign Not Found",
-                style=discord.ButtonStyle.secondary,
-                disabled=True,
-                emoji="❌"
-            )
-            self.add_item(error_button)
+            self.define_scenario_button.disabled = True
+            self.define_scenario_button.label = "Err: CNotFound"
+            self.start_next_button.disabled = True
+            self.start_next_button.label = "Err: CNotFound"
+            # No direct message edit here; the caller (_update_control_message) handles it.
             return
-        
-        # Get all scenarios for this campaign
+
+        # Define Scenario Button Logic
+        is_creator = False # Placeholder, will be checked if interaction is provided and user matches
+        is_admin = False   # Placeholder
+        if interaction: # Basic permission check if interaction context is available
+            # This is a soft check; primary permission checks are in callbacks.
+            # Getting guild from bot instance and campaign guild_id
+            guild = self.bot.get_guild(campaign['guild_id'])
+            if guild:
+                member = guild.get_member(interaction.user.id)
+                if member:
+                    is_admin = member.guild_permissions.administrator
+            is_creator = interaction.user.id == campaign['creator_id']
+
+
+        if campaign['status'] in ['completed', 'rejected', 'archived']:
+            self.define_scenario_button.disabled = True
+            self.define_scenario_button.label = "Campaign Ended"
+        elif campaign['current_defined_scenarios'] >= campaign['num_expected_scenarios']:
+            self.define_scenario_button.disabled = True
+            self.define_scenario_button.label = "All Scenarios Defined"
+        else:
+            # Enable if campaign is in a state where scenarios can be defined (e.g. setup, active)
+            # and user has permission (creator/admin). For view update, we assume this is illustrative;
+            # actual enforcement is in the callback.
+            self.define_scenario_button.disabled = False # Simplified for view state; callback enforces
+            self.define_scenario_button.label = f"Define S{campaign['current_defined_scenarios'] + 1}/{campaign['num_expected_scenarios']}"
+
+        # Start/Next Button Logic
+        self.start_next_button.disabled = True # Default to disabled
+
+        # Fetch all proposals for the campaign to determine button states accurately
+        # This ensures we have the latest status for all scenarios.
         proposals_in_campaign = await db.get_proposals_by_campaign_id(self.campaign_id, campaign.get('guild_id'))
         if proposals_in_campaign:
             proposals_in_campaign.sort(key=lambda x: x.get('scenario_order', 0))
         else:
-            proposals_in_campaign = []
-        
-        # Create scenario definition buttons (Row 1 & 2)
-        max_scenarios = campaign['num_expected_scenarios']
-        current_defined = campaign['current_defined_scenarios']
-        
-        for scenario_num in range(1, max_scenarios + 1):
-            # Find existing scenario
-            existing_scenario = next((p for p in proposals_in_campaign if p.get('scenario_order') == scenario_num), None)
-            
-            if existing_scenario:
-                # Scenario exists - show status
-                status = existing_scenario['status']
-                if status == 'ApprovedScenario':
-                    button_style = discord.ButtonStyle.success
-                    button_label = f"S{scenario_num} ✅"
-                    emoji = "📄"
-                    disabled = True
-                elif status == 'Voting':
-                    button_style = discord.ButtonStyle.primary
-                    button_label = f"S{scenario_num} 🗳️"
-                    emoji = "⚡"
-                    disabled = True
-                elif status == 'Closed':
-                    button_style = discord.ButtonStyle.secondary
-                    button_label = f"S{scenario_num} 🏁"
-                    emoji = "🏆"
-                    disabled = True
-                else:  # Pending Approval, etc.
-                    button_style = discord.ButtonStyle.secondary
-                    button_label = f"S{scenario_num} ⏳"
-                    emoji = "🔄"
-                    disabled = True
-            else:
-                # Scenario doesn't exist
-                if scenario_num == current_defined + 1:
-                    # This is the next scenario to define
-                    button_style = discord.ButtonStyle.primary
-                    button_label = f"Define S{scenario_num}"
-                    emoji = "📝"
-                    disabled = False
-                else:
-                    # Future scenario (not ready to define)
-                    button_style = discord.ButtonStyle.secondary
-                    button_label = f"S{scenario_num} 🔒"
-                    emoji = "⏸️"
-                    disabled = True
-            
-            scenario_button = discord.ui.Button(
-                label=button_label,
-                style=button_style,
-                custom_id=f"campaign_scenario_{self.campaign_id}_{scenario_num}",
-                emoji=emoji,
-                disabled=disabled
-            )
-            
-            if not disabled:
-                # Only active buttons get callbacks
-                scenario_button.callback = self.create_scenario_callback(scenario_num)
-                
-            self.scenario_buttons[scenario_num] = scenario_button
-            self.add_item(scenario_button)
-        
-        # Add start/progress button (Row 3)
+            proposals_in_campaign = [] # Ensure it's an empty list if None
+
         if campaign['status'] == 'setup':
-            # Check if we can start the campaign
+            self.start_next_button.label = "Start Campaign"
+            # A campaign can be started if at least one scenario is defined AND approved.
+            # With auto-approval for scenarios in 'setup' campaigns, this means if S1 is defined, it should be 'ApprovedScenario'.
             first_scenario = next((p for p in proposals_in_campaign if p.get('scenario_order') == 1), None)
             if first_scenario and first_scenario.get('status') == 'ApprovedScenario':
-                self.start_button = discord.ui.Button(
-                    label="🚀 Start Campaign",
-                    style=discord.ButtonStyle.success,
-                    custom_id=f"campaign_start_{self.campaign_id}",
-                    emoji="▶️"
-                )
-                self.start_button.callback = self.start_campaign_callback
+                self.start_next_button.disabled = False
             else:
-                self.start_button = discord.ui.Button(
-                    label="Define Scenario 1 First",
-                    style=discord.ButtonStyle.secondary,
-                    disabled=True,
-                    emoji="⏸️"
-                )
+                self.start_next_button.disabled = True
+                if not first_scenario:
+                    self.start_next_button.label = "Define Scenario 1 First"
+                # If S1 exists but isn't ApprovedScenario (e.g. if campaign was approved *before* S1 was defined, an edge case)
+                # or if S1 is Pending Approval (should not happen if auto-approval works for 'setup' state)
+                # a more generic label might be needed, but "Define Scenario 1 First" covers the primary path.
+                # The callback logic in start_next_callback will provide a more specific error if S1 is not approved.
+
         elif campaign['status'] == 'active':
-            # Check for next scenario to start
             active_voting_scenarios = [p for p in proposals_in_campaign if p['status'] == 'Voting']
-            
+
             if active_voting_scenarios:
-                # Something is already voting
-                active_scenario = active_voting_scenarios[0]
-                self.start_button = discord.ui.Button(
-                    label=f"S{active_scenario.get('scenario_order')} Active",
-                    style=discord.ButtonStyle.primary,
-                    disabled=True,
-                    emoji="🗳️"
-                )
+                self.start_next_button.label = f"S{active_voting_scenarios[0].get('scenario_order','?')} Active"
+                self.start_next_button.disabled = True
             else:
-                # Check for next scenario to start
+                # No scenario is currently voting, check if we can start the next one
                 closed_scenarios = sorted(
-                    [p for p in proposals_in_campaign if p['status'] in ['Closed', 'Passed', 'Failed']],
+                    [p for p in proposals_in_campaign if p['status'] == 'Closed'],
                     key=lambda x: x.get('scenario_order', 0),
                     reverse=True
                 )
                 last_closed_order = closed_scenarios[0]['scenario_order'] if closed_scenarios else 0
-                next_scenario_order = last_closed_order + 1
-                
-                if next_scenario_order > max_scenarios:
-                    self.start_button = discord.ui.Button(
-                        label="🎉 All Scenarios Complete",
-                        style=discord.ButtonStyle.secondary,
-                        disabled=True,
-                        emoji="🏆"
-                    )
-                else:
-                    next_scenario = next((p for p in proposals_in_campaign if p.get('scenario_order') == next_scenario_order), None)
-                    if next_scenario and next_scenario.get('status') == 'ApprovedScenario':
-                        self.start_button = discord.ui.Button(
-                            label=f"▶️ Start Scenario {next_scenario_order}",
-                            style=discord.ButtonStyle.success,
-                            custom_id=f"campaign_start_scenario_{self.campaign_id}_{next_scenario_order}",
-                            emoji="🚀"
-                        )
-                        self.start_button.callback = self.start_next_scenario_callback
-                    else:
-                        self.start_button = discord.ui.Button(
-                            label=f"Define S{next_scenario_order} First",
-                            style=discord.ButtonStyle.secondary,
-                            disabled=True,
-                            emoji="⏸️"
-                        )
-        else:
-            # Completed, rejected, etc.
-            self.start_button = discord.ui.Button(
-                label=f"Campaign {campaign['status'].title()}",
-                style=discord.ButtonStyle.secondary,
-                disabled=True,
-                emoji="🏁"
-            )
-        
-        if self.start_button:
-            self.add_item(self.start_button)
-        
-        # Add management button (Row 4)
-        self.manage_button = discord.ui.Button(
-            label="📊 Campaign Info",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"campaign_info_{self.campaign_id}",
-            emoji="ℹ️"
-        )
-        self.manage_button.callback = self.campaign_info_callback
-        self.add_item(self.manage_button)
-    
-    def create_scenario_callback(self, scenario_num: int):
-        """Create a callback function for a specific scenario button"""
-        async def scenario_callback(interaction: discord.Interaction):
-            await self.define_scenario_callback(interaction, scenario_num)
-        return scenario_callback
+                next_scenario_order_needed = last_closed_order + 1
 
-    async def define_scenario_callback(self, interaction: discord.Interaction, scenario_num: int):
+                if next_scenario_order_needed > campaign['num_expected_scenarios']:
+                    self.start_next_button.label = "All Scenarios Done"
+                    self.start_next_button.disabled = True
+                    # Potentially set campaign status to 'completed' here or via a separate mechanism/button
+                else:
+                    next_scenario_to_start = next((p for p in proposals_in_campaign if p.get('scenario_order') == next_scenario_order_needed), None)
+                    if next_scenario_to_start and next_scenario_to_start.get('status') == 'ApprovedScenario':
+                        self.start_next_button.label = f"Start Scenario {next_scenario_order_needed}"
+                        self.start_next_button.disabled = False
+                    elif next_scenario_to_start and next_scenario_to_start.get('status') == 'Pending Approval':
+                        # This case should be less common if auto-approval for scenarios in active campaigns is working
+                        self.start_next_button.label = f"Await S{next_scenario_order_needed} Approval"
+                        self.start_next_button.disabled = True
+                    else: # Not defined or not in a startable state
+                        self.start_next_button.label = f"Define S{next_scenario_order_needed} First"
+                        self.start_next_button.disabled = True
+        elif campaign['status'] in ['completed', 'rejected', 'archived']:
+            self.start_next_button.label = "Campaign Ended"
+            self.start_next_button.disabled = True
+        else: # Unknown status or pending_approval (cannot start yet)
+            self.start_next_button.label = f"Status: {campaign['status'].title()}"
+            self.start_next_button.disabled = True
+
+    async def define_scenario_callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         campaign = await db.get_campaign(self.campaign_id)
@@ -1699,13 +1603,13 @@ class CampaignControlView(discord.ui.View):
         # which allows it to edit the ephemeral followup if it times out.
         scenario_definition_prompt_view = DefineScenarioView(
             campaign_id=self.campaign_id,
-            next_scenario_order=scenario_num,
+            next_scenario_order=next_scenario_num,
             total_scenarios=total_scenarios,
             original_interaction=interaction # Pass the current button interaction
         )
 
         followup_message_content = (
-            f"🗳️ Defining Scenario {scenario_num} of {total_scenarios} for Campaign '{campaign['title']}' (ID: C#{self.campaign_id})."
+            f"🗳️ Defining Scenario {next_scenario_num} of {total_scenarios} for Campaign '{campaign['title']}' (ID: C#{self.campaign_id})."
         )
 
         # Send the DefineScenarioView as a new ephemeral message
@@ -1719,13 +1623,13 @@ class CampaignControlView(discord.ui.View):
 
         # Optionally, update the control panel message itself to reflect that definition is in progress
         # This might be too noisy if the user quickly defines. For now, we rely on button state updates.
-        # await self.rebuild_view() # Pass interaction if needed for permission context
+        # await self.update_button_states(interaction) # Pass interaction if needed for permission context
         # if interaction.message: # The control panel message
         #    await interaction.message.edit(view=self)
         # For now, a simple confirmation that the flow has started.
         # The primary feedback is the new view being sent.
 
-    async def start_campaign_callback(self, interaction: discord.Interaction):
+    async def start_next_callback(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         guild = interaction.guild
         if not guild:
@@ -1737,7 +1641,7 @@ class CampaignControlView(discord.ui.View):
         campaign = await db.get_campaign(self.campaign_id)
         if not campaign:
             await interaction.followup.send(f"Error: Campaign C#{self.campaign_id} not found.", ephemeral=True)
-            await self.rebuild_view() # Update view if campaign is gone
+            await self.update_button_states(interaction) # Update view if campaign is gone
             if interaction.message: await interaction.message.edit(view=self)
             return
 
@@ -1862,7 +1766,7 @@ class CampaignControlView(discord.ui.View):
                      updated_embed.add_field(name="Last Action Info", value=action_taken_message, inline=False)
                 updated_embed.set_footer(text=f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
 
-                await self.rebuild_view() # Update button states before editing message
+                await self.update_button_states(interaction) # Update button states before editing message
                 await interaction.message.edit(embed=updated_embed, view=self)
             except discord.NotFound:
                 print(f"WARN: Control message for C#{self.campaign_id} not found when trying to edit in start_next_callback.")
@@ -1878,181 +1782,6 @@ class CampaignControlView(discord.ui.View):
             await interaction.followup.send(action_taken_message, ephemeral=True)
         else: # Should not happen if logic is correct
             await interaction.followup.send("No specific action was performed. Please check campaign status.", ephemeral=True)
-
-    async def start_next_scenario_callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        guild = interaction.guild
-        if not guild:
-            await interaction.followup.send("This command can only be used in a server.", ephemeral=True)
-            return
-
-        bot_instance = self.bot # or interaction.client
-
-        campaign = await db.get_campaign(self.campaign_id)
-        if not campaign:
-            await interaction.followup.send(f"Error: Campaign C#{self.campaign_id} not found.", ephemeral=True)
-            await self.rebuild_view() # Update view if campaign is gone
-            if interaction.message: await interaction.message.edit(view=self)
-            return
-
-        # Permission Check: Creator or Admin
-        is_creator = interaction.user.id == campaign['creator_id']
-        member = guild.get_member(interaction.user.id)
-        is_admin = member.guild_permissions.administrator if member else False
-
-        if not (is_creator or is_admin):
-            await interaction.followup.send("You must be the campaign creator or an admin to start/progress the campaign.", ephemeral=True)
-            return
-
-        proposals_in_campaign = await db.get_proposals_by_campaign_id(self.campaign_id, guild.id)
-        proposals_in_campaign.sort(key=lambda x: x.get('scenario_order', 0))
-
-        action_taken_message = ""
-        action_error = False
-
-        # Case 1: Start the Campaign (if in 'setup' state)
-        if campaign['status'] == 'setup':
-            # Find all approved scenarios in the campaign - include ALL scenarios, not just scenario 1
-            scenarios_to_start_ids = [
-                p['proposal_id'] for p in proposals_in_campaign
-                if p.get('status') == 'ApprovedScenario'
-            ]
-
-            if not scenarios_to_start_ids:
-                action_taken_message = "Cannot start campaign: No scenarios are defined or approved."
-                action_error = True
-            else:
-                await db.update_campaign_status(self.campaign_id, 'active')
-                campaign['status'] = 'active'
-                action_taken_message = f"Campaign C#{self.campaign_id} ('{campaign["title"]}') is now active!\n"
-
-                # Initiate voting for all found scenarios
-                success_init_stage, msg_init_stage = await voting_utils.initiate_campaign_stage_voting(guild, self.campaign_id, scenarios_to_start_ids, bot_instance)
-
-                if success_init_stage:
-                    action_taken_message += f"Processing for {len(scenarios_to_start_ids)} scenario(s) initiated. Details: {msg_init_stage}"
-                else:
-                    action_taken_message += f"Failed to initiate some/all scenarios. Details: {msg_init_stage}"
-                    action_error = True
-
-                audit_channel = discord.utils.get(guild.text_channels, name="audit-log")
-                if audit_channel:
-                    await audit_channel.send(f"▶️ **Campaign Started**: C#{self.campaign_id} ('{campaign['title']}') started by {interaction.user.mention}. {len(scenarios_to_start_ids)} scenario(s) initiated.")
-
-        # Case 2: Start Next Scenario (if in 'active' state and no current scenario is 'Voting')
-        elif campaign['status'] == 'active':
-            active_voting_scenarios = [p for p in proposals_in_campaign if p['status'] == 'Voting']
-            if active_voting_scenarios:
-                # If a scenario is ALREADY voting, do not start another one from the same campaign.
-                # This assumes sequential progression if a scenario is already live.
-                # If parallel scenarios *within the same order* are desired to run truly simultaneously from the start,
-                # the logic in 'setup' case with `initiate_campaign_stage_voting` handles that.
-                # This 'active' block now focuses on progressing *after* a voting scenario (or all of its order) concludes.
-                scenario_titles = ", ".join([f"S#{s.get('scenario_order')} ('{s.get('title')}')" for s in active_voting_scenarios])
-                action_taken_message = f"Cannot start another scenario yet: {scenario_titles} is still active."
-                action_error = True
-            else:
-                closed_scenarios = sorted([p for p in proposals_in_campaign if p['status'] in ['Closed', 'Passed', 'Failed']], key=lambda x: x.get('scenario_order', 0), reverse=True)
-                last_processed_order = closed_scenarios[0]['scenario_order'] if closed_scenarios else 0
-                next_scenario_order_needed = last_processed_order + 1
-
-                if next_scenario_order_needed > campaign['num_expected_scenarios']:
-                    action_taken_message = "All scenarios in this campaign have been completed."
-                    # Consider setting campaign status to 'completed' here.
-                    # await db.update_campaign_status(self.campaign_id, 'completed')
-                    # campaign['status'] = 'completed'
-                else:
-                    # Find all approved scenarios for the next order
-                    scenarios_to_start_ids = [
-                        p['proposal_id'] for p in proposals_in_campaign
-                        if p.get('scenario_order') == next_scenario_order_needed and p.get('status') == 'ApprovedScenario'
-                    ]
-
-                    if not scenarios_to_start_ids:
-                        action_taken_message = f"Cannot start Scenario Order {next_scenario_order_needed}: No scenarios found, or none are approved for this order."
-                        action_error = True
-                    else:
-                        # Initiate voting for all found scenarios for the next_scenario_order_needed
-                        success_init_stage, msg_init_stage = await voting_utils.initiate_campaign_stage_voting(guild, self.campaign_id, scenarios_to_start_ids, bot_instance)
-                        if success_init_stage:
-                            action_taken_message = f"Processing for {len(scenarios_to_start_ids)} scenario(s) at order {next_scenario_order_needed} initiated. Details: {msg_init_stage}"
-                        else:
-                            action_taken_message = f"Failed to initiate some/all scenarios at order {next_scenario_order_needed}. Details: {msg_init_stage}"
-                            action_error = True
-
-                        audit_channel = discord.utils.get(guild.text_channels, name="audit-log")
-                        if audit_channel:
-                            await audit_channel.send(f"▶️ **Next Campaign Stage**: For C#{self.campaign_id}, {len(scenarios_to_start_ids)} scenario(s) for order {next_scenario_order_needed} initiated by {interaction.user.mention}.")
-        else:
-            action_taken_message = f"Campaign C#{self.campaign_id} is in status '{campaign["status"]}'. No action taken."
-            action_error = True
-
-        # Update the control panel message (embed and view)
-        if interaction.message:
-            try:
-                # Re-fetch fresh campaign data for the embed, as status might have changed
-                fresh_campaign_data = await db.get_campaign(self.campaign_id)
-                if fresh_campaign_data: # Check if still exists
-                    campaign = fresh_campaign_data # Use the latest data for embed
-
-                # Update embed
-                creator = await guild.fetch_member(campaign['creator_id']) # Fetch creator for mention
-                embed_title = f"Campaign Management: '{campaign['title']}' (ID: C#{self.campaign_id})"
-                embed_desc = f"**Creator:** {creator.mention if creator else f'ID: {campaign['creator_id']}'}\n"
-                embed_desc += f"**Description:** {campaign['description'] or 'Not provided.'}\n"
-                embed_desc += f"**Total Scenarios Expected:** {campaign['num_expected_scenarios']}\n"
-                embed_desc += f"**Currently Defined:** {campaign['current_defined_scenarios']}"
-
-                new_color = discord.Color.blue()
-                if campaign['status'] == 'active': new_color = discord.Color.green()
-                elif campaign['status'] == 'completed': new_color = discord.Color.gold()
-                elif campaign['status'] == 'setup': new_color = discord.Color.light_grey()
-
-                updated_embed = discord.Embed(title=embed_title, description=embed_desc, color=new_color)
-                updated_embed.add_field(name="Status", value=campaign['status'].title(), inline=True)
-                if action_taken_message and not action_error:
-                    updated_embed.add_field(name="Last Action Result", value=action_taken_message.split('\n')[0], inline=False) # Show first line of success
-                elif action_error:
-                     updated_embed.add_field(name="Last Action Info", value=action_taken_message, inline=False)
-                updated_embed.set_footer(text=f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-
-                await self.rebuild_view() # Update button states before editing message
-                await interaction.message.edit(embed=updated_embed, view=self)
-            except discord.NotFound:
-                print(f"WARN: Control message for C#{self.campaign_id} not found when trying to edit in start_next_callback.")
-            except Exception as e_edit_msg:
-                print(f"ERROR: Failed to edit control message for C#{self.campaign_id} in start_next_callback: {e_edit_msg}")
-                # Send a followup if editing the original message failed but an action was attempted
-                if action_taken_message: # If there was something to report
-                    await interaction.followup.send(f"Control panel update failed, but: {action_taken_message}", ephemeral=True)
-                    return # Avoid sending another followup
-
-        # Send final followup to the admin/creator who clicked the button
-        if action_taken_message:
-            await interaction.followup.send(action_taken_message, ephemeral=True)
-        else: # Should not happen if logic is correct
-            await interaction.followup.send("No specific action was performed. Please check campaign status.", ephemeral=True)
-
-    async def campaign_info_callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        campaign = await db.get_campaign(self.campaign_id)
-        if not campaign:
-            await interaction.followup.send("Campaign data not found.", ephemeral=True)
-            return
-
-        embed = discord.Embed(title=f"📋 Campaign Information: '{campaign['title']}' (ID: C#{self.campaign_id})", color=discord.Color.blue())
-        embed.add_field(name="Status", value=campaign['status'].title(), inline=True)
-        embed.add_field(name="Creator", value=f"{campaign['creator_id']}", inline=False)
-        embed.add_field(name="Description", value=campaign['description'] or "No description provided.", inline=False)
-        embed.add_field(name="Total Scenarios Expected", value=campaign['num_expected_scenarios'], inline=False)
-        embed.add_field(name="Currently Defined", value=campaign['current_defined_scenarios'], inline=False)
-        embed.set_footer(text=f"Created: {utils.format_deadline(campaign['creation_timestamp'])}")
-
-        try:
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        except discord.HTTPException as e:
-            print(f"ERROR: Failed to send campaign info: {e}")
-            await interaction.followup.send("Failed to send campaign information.", ephemeral=True)
 
     async def on_timeout(self):
         # This method is called when the view times out.

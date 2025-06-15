@@ -830,47 +830,6 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                 await db.increment_defined_scenarios(campaign_id)
                 print(f"DEBUG: Incremented defined scenarios count for campaign C#{campaign_id}")
             
-            # Update campaign control panel if it exists
-            if campaign_id:
-                try:
-                    campaign = await db.get_campaign(campaign_id)
-                    if campaign and campaign.get('control_message_id'):
-                        guild = interaction.guild
-                        if guild:
-                            campaign_mgmt_channel_name = utils.CHANNELS.get("campaign_management", "campaign-management")
-                            campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-                            if campaign_mgmt_channel:
-                                try:
-                                    control_message = await campaign_mgmt_channel.fetch_message(campaign['control_message_id'])
-                                    if control_message:
-                                        # Update the control view
-                                        new_control_view = CampaignControlView(campaign_id, interaction.client)
-                                        await new_control_view.rebuild_view()
-                                        
-                                        # Update the embed as well
-                                        updated_campaign = await db.get_campaign(campaign_id)  # Get fresh data
-                                        creator = await guild.fetch_member(updated_campaign['creator_id'])
-                                        embed_title = f"Campaign Management: '{updated_campaign['title']}' (ID: C#{campaign_id})"
-                                        embed_desc = f"**Creator:** {creator.mention if creator else f'ID: {updated_campaign['creator_id']}'}\n"
-                                        embed_desc += f"**Description:** {updated_campaign['description'] or 'Not provided.'}\n"
-                                        embed_desc += f"**Total Scenarios Expected:** {updated_campaign['num_expected_scenarios']}\n"
-                                        embed_desc += f"**Currently Defined:** {updated_campaign['current_defined_scenarios']}"
-                                        
-                                        new_color = discord.Color.green() if updated_campaign['status'] == 'active' else discord.Color.blue()
-                                        updated_embed = discord.Embed(title=embed_title, description=embed_desc, color=new_color)
-                                        updated_embed.add_field(name="Status", value=updated_campaign['status'].title(), inline=True)
-                                        updated_embed.add_field(name="Last Action", value=f"Scenario {scenario_order} defined", inline=False)
-                                        updated_embed.set_footer(text=f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-                                        
-                                        await control_message.edit(embed=updated_embed, view=new_control_view)
-                                        print(f"DEBUG: Updated campaign control panel for C#{campaign_id}")
-                                except discord.NotFound:
-                                    print(f"DEBUG: Campaign control message not found for C#{campaign_id}")
-                                except Exception as e_update_control:
-                                    print(f"ERROR: Failed to update campaign control panel for C#{campaign_id}: {e_update_control}")
-                except Exception as e_get_campaign:
-                    print(f"ERROR: Failed to get campaign data for control panel update C#{campaign_id}: {e_get_campaign}")
-            
             # No admin notification needed since it's auto-approved
 
         else: # Status is 'Voting'
@@ -1313,7 +1272,7 @@ async def _perform_approve_campaign_action(admin_interaction_for_message_edit: d
     if campaign_mgmt_channel:
         control_view = CampaignControlView(campaign_id, bot_instance)
         # Initial update of button states based on current (just approved) campaign state
-        await control_view.rebuild_view()
+        await control_view.update_button_states()
 
         embed_title = f"Campaign Management: '{campaign_data['title']}' (ID: C#{campaign_id})"
         embed_description = f"**Creator:** {creator.mention if creator else f'ID: {campaign_data['creator_id']}'}\n"
