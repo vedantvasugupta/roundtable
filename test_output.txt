@@ -1,0 +1,12 @@
+=== Proposal Creation Test ===
+Initializing database...
+
+=== Testing Proposal Creation ===
+
+Creating test proposal...
+❌ Error during test: NOT NULL constraint failed: proposals.guild_id
+
+=== Cleaning Up Test Data ===
+✅ Cleaned up 0 test proposals
+
+❌ Test failed. Please check the errors above.

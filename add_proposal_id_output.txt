@@ -1,0 +1,23 @@
+Adding proposal_id column to proposals table...
+proposal_id column already exists
+
+Updated columns in proposals table:
+  - id (INTEGER)
+  - guild_id (INTEGER)
+  - proposer_id (INTEGER)
+  - proposal_text (TEXT)
+  - voting_mechanism (TEXT)
+  - deadline (TIMESTAMP)
+  - status (TEXT)
+  - created_at (TIMESTAMP)
+  - message_id (INTEGER)
+  - server_id (INTEGER)
+  - title (TEXT)
+  - description (TEXT)
+  - requires_approval (BOOLEAN)
+  - approved_by (INTEGER)
+  - proposal_id (INTEGER)
+
+All data migrated correctly from id to proposal_id
+
+Database schema updated successfully

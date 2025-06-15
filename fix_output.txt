@@ -1,0 +1,38 @@
+=== Server ID Column Fix Tool ===
+Creating backup: bot_database.db.20250227_005654.backup
+Backup created successfully: bot_database.db.20250227_005654.backup
+
+Fixing server_id column issue...
+
+Checking current database schema...
+Current columns in proposals table:
+  - id (INTEGER)
+  - guild_id (INTEGER)
+  - proposer_id (INTEGER)
+  - proposal_text (TEXT)
+  - voting_mechanism (TEXT)
+  - deadline (TIMESTAMP)
+  - status (TEXT)
+  - created_at (TIMESTAMP)
+  - message_id (INTEGER)
+  - server_id (INTEGER)
+  - title (TEXT)
+  - description (TEXT)
+  - requires_approval (BOOLEAN)
+  - approved_by (INTEGER)
+server_id column already exists
+Migrating data from guild_id to server_id...
+Data migrated from guild_id to server_id
+Database fix completed successfully
+
+Verifying fix...
+✅ server_id column exists in the proposals table
+✅ All data successfully migrated from guild_id to server_id
+ℹ️ No proposals in the database to check
+
+Fix verification completed successfully
+
+✅ Database fix completed successfully!
+
+Now you can run the !propose command without errors.
+The code will use the server_id column for new proposals.

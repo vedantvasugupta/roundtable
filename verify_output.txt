@@ -1,0 +1,47 @@
+=== Server ID Column Verification ===
+
+Verifying server_id column in proposals table...
+Columns in proposals table:
+  - id (INTEGER)
+  - guild_id (INTEGER)
+  - proposer_id (INTEGER)
+  - proposal_text (TEXT)
+  - voting_mechanism (TEXT)
+  - deadline (TIMESTAMP)
+  - status (TEXT)
+  - created_at (TIMESTAMP)
+  - message_id (INTEGER)
+  - server_id (INTEGER)
+  - title (TEXT)
+  - description (TEXT)
+  - requires_approval (BOOLEAN)
+  - approved_by (INTEGER)
+
+Γ£à server_id column exists in the proposals table
+
+Inserting a test proposal...
+Γ£à Test proposal inserted with ID: 1
+
+Proposal details:
+  id: 1
+  guild_id: 123456789
+  proposer_id: 987654321
+  proposal_text: Test Description
+  voting_mechanism: plurality
+  deadline: 2025-03-02 00:58:48
+  status: Pending
+  created_at: 2025-02-27 00:58:48
+  message_id: None
+  server_id: 123456789
+  title: Test Proposal
+  description: Test Description
+  requires_approval: 1
+  approved_by: None
+
+Γ£à server_id was stored correctly
+
+Γ£à Test proposal cleaned up
+
+Γ£à Verification completed successfully!
+The database fix has resolved the issue with the server_id column.
+The !propose command should now work correctly.

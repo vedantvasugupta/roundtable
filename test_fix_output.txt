@@ -1,0 +1,41 @@
+=== Proposal Creation Fix Test ===
+
+=== Testing Proposal Creation ===
+
+Creating test proposal...
+Γ£à Proposal created successfully with ID: 7
+
+Retrieving proposal to verify storage...
+Γ£à Proposal retrieved successfully
+
+Proposal details:
+  id: 7
+  guild_id: 123456789
+  proposer_id: 987654321
+  proposal_text: This is a test proposal to verify the database fix
+  voting_mechanism: plurality
+  deadline: 2025-03-02T01:07:42.358881
+  status: Pending
+  created_at: 2025-02-27 01:07:42
+  message_id: None
+  server_id: 123456789
+  title: Test Proposal
+  description: This is a test proposal to verify the database fix
+  requires_approval: 1
+  approved_by: None
+  proposal_id: None
+
+Γ£à server_id was stored correctly
+Γ£à guild_id was stored correctly
+
+Verifying columns in database directly...
+Γ£à Database values: server_id=123456789, guild_id=123456789
+Γ£à Both server_id and guild_id match the expected value
+
+=== Cleaning Up Test Data ===
+Γ£à Cleaned up 1 test proposals
+
+Γ£à Test completed successfully!
+
+The database fix has resolved the issue with the server_id column.
+The !propose command should now work correctly.
