@@ -110,39 +110,14 @@ class TokenInvestmentModal(discord.ui.Modal, title="Invest Tokens"):
         self.base_vote_view = base_vote_view
         self.remaining_tokens = remaining_tokens
 
-        # Get weight mode from proposal hyperparameters
-        proposal_id = base_vote_view.proposal_id
-        weight_mode = "equal"  # Default
-        
-        # Get weight mode from hyperparameters if available
-        if hasattr(base_vote_view, 'proposal_hyperparameters') and base_vote_view.proposal_hyperparameters:
-            weight_mode = base_vote_view.proposal_hyperparameters.get('weight_mode', 'equal')
-        
-        # Determine max tokens based on weight mode
-        if weight_mode == "equal":
-            max_tokens = min(1, remaining_tokens)
-            title_text = f"Invest Tokens (Equal Weight - Max: 1)"
-            placeholder_text = "Enter 0 or 1"
-        else:  # proportional
-            max_tokens = remaining_tokens
-            title_text = f"Invest Tokens (Proportional - Max: {remaining_tokens})"
-            placeholder_text = f"Enter 0-{remaining_tokens}"
-        
-        # Update modal title
-        self.title = title_text
-        
         self.token_input = discord.ui.TextInput(
-            label=f"Tokens to Invest",
-            placeholder=placeholder_text,
+            label=f"Tokens to Invest (Max: {remaining_tokens})",
+            placeholder=f"Enter a number (0-{remaining_tokens})",
             required=True,
             min_length=1,
-            max_length=len(str(max_tokens)) if max_tokens > 0 else 1
+            max_length=len(str(remaining_tokens)) if remaining_tokens > 0 else 1
         )
         self.add_item(self.token_input)
-        
-        # Store max tokens for validation
-        self.max_tokens = max_tokens
-        self.weight_mode = weight_mode
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -153,35 +128,12 @@ class TokenInvestmentModal(discord.ui.Modal, title="Invest Tokens"):
 
             tokens_to_invest = int(tokens_to_invest_str)
 
-            # Enhanced validation based on weight mode
-            if self.weight_mode == "equal":
-                if tokens_to_invest not in [0, 1]:
-                    await interaction.response.send_message(
-                        f"❌ In equal weight mode, you can only invest 0 or 1 token.",
-                        ephemeral=True
-                    )
-                    return
-                if tokens_to_invest > self.remaining_tokens:
-                    await interaction.response.send_message(
-                        f"❌ You don't have enough tokens. You have {self.remaining_tokens} remaining.",
-                        ephemeral=True
-                    )
-                    return
-            else:  # proportional mode
-                if not (0 <= tokens_to_invest <= self.remaining_tokens):
-                    await interaction.response.send_message(
-                        f"❌ Invalid amount. You must invest between 0 and {self.remaining_tokens} tokens.",
-                        ephemeral=True
-                    )
-                    return
-
-            # Provide feedback on token investment
-            if tokens_to_invest == 0:
-                investment_msg = "🚫 You chose to invest 0 tokens in this scenario."
-            elif self.weight_mode == "equal":
-                investment_msg = f"🗳️ You invested 1 token (equal weight mode). You have {self.remaining_tokens - 1} tokens remaining."
-            else:
-                investment_msg = f"🗳️ You invested {tokens_to_invest} tokens. You have {self.remaining_tokens - tokens_to_invest} tokens remaining."
+            if not (0 <= tokens_to_invest <= self.remaining_tokens):
+                await interaction.response.send_message(
+                    f"❌ Invalid amount. You must invest between 0 and {self.remaining_tokens} tokens.",
+                    ephemeral=True
+                )
+                return
 
             await self.base_vote_view.finalize_vote(interaction, tokens_invested_this_scenario=tokens_to_invest)
 
@@ -207,8 +159,7 @@ class BaseVoteView(discord.ui.View):
                  allow_abstain: bool = True,
                  campaign_id: Optional[int] = None,
                  campaign_details: Optional[Dict[str, Any]] = None,
-                 user_remaining_tokens: Optional[int] = None,
-                 proposal_hyperparameters: Optional[Dict[str, Any]] = None): # Added campaign params and hyperparameters
+                 user_remaining_tokens: Optional[int] = None): # Added campaign params
         super().__init__(timeout=86400)  # 24-hour timeout for voting
         self.proposal_id = proposal_id
         self.options = options
@@ -220,7 +171,6 @@ class BaseVoteView(discord.ui.View):
         self.campaign_id = campaign_id
         self.campaign_details = campaign_details
         self.user_remaining_tokens = user_remaining_tokens
-        self.proposal_hyperparameters = proposal_hyperparameters or {}
 
         self.add_mechanism_items()  # Populate with mechanism-specific buttons/selects
         if allow_abstain:
@@ -295,36 +245,21 @@ class BaseVoteView(discord.ui.View):
                     await interaction.response.defer(ephemeral=True, thinking=True)
                 await self.finalize_vote(interaction, tokens_invested_this_scenario=0)
             else:
-                # Check weight mode to determine behavior
-                weight_mode = self.proposal_hyperparameters.get('weight_mode', 'equal')
-                
-                if weight_mode == "equal":
-                    # In equal weight mode, automatically invest 1 token if available
-                    if fresh_user_remaining_tokens >= 1:
-                        if not interaction.response.is_done():
-                            await interaction.response.defer(ephemeral=True, thinking=True)
-                        await self.finalize_vote(interaction, tokens_invested_this_scenario=1)
+                # It's a campaign vote with tokens, present the token investment modal.
+                # This will be the first response to the interaction.
+                try:
+                    token_modal = TokenInvestmentModal(base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
+                    await interaction.response.send_modal(token_modal)
+                except discord.errors.InteractionResponded:
+                    print(f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
+                    await interaction.followup.send("An error occurred while trying to process your selection. Please try again.", ephemeral=True)
+                except Exception as e:
+                    print(f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
+                    traceback.print_exc()
+                    if not interaction.response.is_done():
+                         await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
                     else:
-                        # This shouldn't happen since we checked for 0 tokens above, but handle just in case
-                        if not interaction.response.is_done():
-                            await interaction.response.defer(ephemeral=True, thinking=True)
-                        await self.finalize_vote(interaction, tokens_invested_this_scenario=0)
-                else:
-                    # Proportional mode: present the token investment modal
-                    # This will be the first response to the interaction.
-                    try:
-                        token_modal = TokenInvestmentModal(base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
-                        await interaction.response.send_modal(token_modal)
-                    except discord.errors.InteractionResponded:
-                        print(f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
-                        await interaction.followup.send("An error occurred while trying to process your selection. Please try again.", ephemeral=True)
-                    except Exception as e:
-                        print(f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
-                        traceback.print_exc()
-                        if not interaction.response.is_done():
-                             await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
-                        else:
-                            await interaction.followup.send("An unexpected error occurred. Please try again.", ephemeral=True)
+                        await interaction.followup.send("An unexpected error occurred. Please try again.", ephemeral=True)
 
         else:
             # Not a campaign vote, or other direct finalize cases
@@ -396,25 +331,7 @@ class BaseVoteView(discord.ui.View):
                     )
                     if token_update_success:
                         new_remaining_tokens = current_db_tokens - tokens_invested_this_scenario
-                        
-                        # Enhanced feedback based on tokens invested and weight mode
-                        weight_mode = self.proposal_hyperparameters.get('weight_mode', 'equal')
-                        
-                        if tokens_invested_this_scenario == 0:
-                            message = f"🚫 Vote recorded for P#{self.proposal_id} with no token investment. You have {new_remaining_tokens} tokens remaining for this campaign."
-                        elif weight_mode == "equal":
-                            message = f"✅ Vote recorded for P#{self.proposal_id} with 1 token (equal weight). You have {new_remaining_tokens} tokens remaining for this campaign."
-                        else:  # proportional
-                            message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens (proportional weight). You have {new_remaining_tokens} tokens remaining for this campaign."
-                        
-                        # Add campaign progress info
-                        if self.campaign_details:
-                            total_tokens = self.campaign_details.get('total_tokens_per_voter', 'Unknown')
-                            if isinstance(total_tokens, int):
-                                tokens_used = total_tokens - new_remaining_tokens
-                                progress_pct = int((tokens_used / total_tokens) * 100) if total_tokens > 0 else 0
-                                message += f"\n\n📊 **Campaign Progress**: {tokens_used}/{total_tokens} tokens used ({progress_pct}%)"
-                        
+                        message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens. You have {new_remaining_tokens} tokens left for this campaign."
                         # Also update the view's token count for immediate display if necessary (though DM is usually ephemeral)
                         self.user_remaining_tokens = new_remaining_tokens
                 else:
@@ -514,8 +431,8 @@ class BaseVoteView(discord.ui.View):
 class PluralityVoteView(BaseVoteView):
     """Interactive UI for plurality voting"""
 
-    def __init__(self, proposal_id: int, options: List[str], user_id: int, allow_abstain: bool = True, campaign_id: Optional[int] = None, campaign_details: Optional[Dict[str, Any]] = None, user_remaining_tokens: Optional[int] = None, proposal_hyperparameters: Optional[Dict[str, Any]] = None):
-        super().__init__(proposal_id, options, user_id, allow_abstain, campaign_id, campaign_details, user_remaining_tokens, proposal_hyperparameters)
+    def __init__(self, proposal_id: int, options: List[str], user_id: int, allow_abstain: bool = True, campaign_id: Optional[int] = None, campaign_details: Optional[Dict[str, Any]] = None, user_remaining_tokens: Optional[int] = None):
+        super().__init__(proposal_id, options, user_id, allow_abstain, campaign_id, campaign_details, user_remaining_tokens)
         self.selected_option: Optional[str] = None # Stores the label of the selected option
 
     def add_mechanism_items(self):
@@ -568,10 +485,6 @@ class PluralityVoteView(BaseVoteView):
 
 class RankedVoteView(BaseVoteView):
     """Interactive UI for ranked voting (Borda/Runoff)"""
-
-    def __init__(self, proposal_id: int, options: List[str], user_id: int, allow_abstain: bool = True, campaign_id: Optional[int] = None, campaign_details: Optional[Dict[str, Any]] = None, user_remaining_tokens: Optional[int] = None, proposal_hyperparameters: Optional[Dict[str, Any]] = None):
-        super().__init__(proposal_id, options, user_id, allow_abstain, campaign_id, campaign_details, user_remaining_tokens, proposal_hyperparameters)
-        self._ranked_options = []
 
     def add_mechanism_items(self):
         self._ranked_options = []
@@ -668,10 +581,6 @@ class RankedVoteView(BaseVoteView):
 
 class ApprovalVoteView(BaseVoteView):
     """Interactive UI for approval voting"""
-
-    def __init__(self, proposal_id: int, options: List[str], user_id: int, allow_abstain: bool = True, campaign_id: Optional[int] = None, campaign_details: Optional[Dict[str, Any]] = None, user_remaining_tokens: Optional[int] = None, proposal_hyperparameters: Optional[Dict[str, Any]] = None):
-        super().__init__(proposal_id, options, user_id, allow_abstain, campaign_id, campaign_details, user_remaining_tokens, proposal_hyperparameters)
-        self._approved_options = []
 
     def add_mechanism_items(self):
         self._approved_options = []
@@ -858,8 +767,7 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
             "allow_abstain": allow_abstain,
             "campaign_id": campaign_id,
             "campaign_details": campaign_details,
-            "user_remaining_tokens": user_remaining_tokens,
-            "proposal_hyperparameters": hyperparameters
+            "user_remaining_tokens": user_remaining_tokens
         }
 
         vote_view: BaseVoteView
@@ -973,8 +881,7 @@ async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_d
                 "allow_abstain": allow_abstain,
                 "campaign_id": campaign_id,
                 "campaign_details": await db.get_campaign(campaign_id), # Potentially pass this in scenario_info if fetched once
-                "user_remaining_tokens": user_tokens_for_this_dm_view, # CRITICAL: pass the batch-consistent token count
-                "proposal_hyperparameters": hyperparameters
+                "user_remaining_tokens": user_tokens_for_this_dm_view # CRITICAL: pass the batch-consistent token count
             }
 
             vote_view: BaseVoteView

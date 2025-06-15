@@ -1,4 +1,4 @@
-import discord
+THIS SHOULD BE A LINTER ERRORimport discord
 from discord.ext import commands
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -295,36 +295,21 @@ class BaseVoteView(discord.ui.View):
                     await interaction.response.defer(ephemeral=True, thinking=True)
                 await self.finalize_vote(interaction, tokens_invested_this_scenario=0)
             else:
-                # Check weight mode to determine behavior
-                weight_mode = self.proposal_hyperparameters.get('weight_mode', 'equal')
-                
-                if weight_mode == "equal":
-                    # In equal weight mode, automatically invest 1 token if available
-                    if fresh_user_remaining_tokens >= 1:
-                        if not interaction.response.is_done():
-                            await interaction.response.defer(ephemeral=True, thinking=True)
-                        await self.finalize_vote(interaction, tokens_invested_this_scenario=1)
+                # It's a campaign vote with tokens, present the token investment modal.
+                # This will be the first response to the interaction.
+                try:
+                    token_modal = TokenInvestmentModal(base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
+                    await interaction.response.send_modal(token_modal)
+                except discord.errors.InteractionResponded:
+                    print(f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
+                    await interaction.followup.send("An error occurred while trying to process your selection. Please try again.", ephemeral=True)
+                except Exception as e:
+                    print(f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
+                    traceback.print_exc()
+                    if not interaction.response.is_done():
+                         await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
                     else:
-                        # This shouldn't happen since we checked for 0 tokens above, but handle just in case
-                        if not interaction.response.is_done():
-                            await interaction.response.defer(ephemeral=True, thinking=True)
-                        await self.finalize_vote(interaction, tokens_invested_this_scenario=0)
-                else:
-                    # Proportional mode: present the token investment modal
-                    # This will be the first response to the interaction.
-                    try:
-                        token_modal = TokenInvestmentModal(base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
-                        await interaction.response.send_modal(token_modal)
-                    except discord.errors.InteractionResponded:
-                        print(f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
-                        await interaction.followup.send("An error occurred while trying to process your selection. Please try again.", ephemeral=True)
-                    except Exception as e:
-                        print(f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
-                        traceback.print_exc()
-                        if not interaction.response.is_done():
-                             await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
-                        else:
-                            await interaction.followup.send("An unexpected error occurred. Please try again.", ephemeral=True)
+                        await interaction.followup.send("An unexpected error occurred. Please try again.", ephemeral=True)
 
         else:
             # Not a campaign vote, or other direct finalize cases
@@ -396,25 +381,7 @@ class BaseVoteView(discord.ui.View):
                     )
                     if token_update_success:
                         new_remaining_tokens = current_db_tokens - tokens_invested_this_scenario
-                        
-                        # Enhanced feedback based on tokens invested and weight mode
-                        weight_mode = self.proposal_hyperparameters.get('weight_mode', 'equal')
-                        
-                        if tokens_invested_this_scenario == 0:
-                            message = f"🚫 Vote recorded for P#{self.proposal_id} with no token investment. You have {new_remaining_tokens} tokens remaining for this campaign."
-                        elif weight_mode == "equal":
-                            message = f"✅ Vote recorded for P#{self.proposal_id} with 1 token (equal weight). You have {new_remaining_tokens} tokens remaining for this campaign."
-                        else:  # proportional
-                            message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens (proportional weight). You have {new_remaining_tokens} tokens remaining for this campaign."
-                        
-                        # Add campaign progress info
-                        if self.campaign_details:
-                            total_tokens = self.campaign_details.get('total_tokens_per_voter', 'Unknown')
-                            if isinstance(total_tokens, int):
-                                tokens_used = total_tokens - new_remaining_tokens
-                                progress_pct = int((tokens_used / total_tokens) * 100) if total_tokens > 0 else 0
-                                message += f"\n\n📊 **Campaign Progress**: {tokens_used}/{total_tokens} tokens used ({progress_pct}%)"
-                        
+                        message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens. You have {new_remaining_tokens} tokens left for this campaign."
                         # Also update the view's token count for immediate display if necessary (though DM is usually ephemeral)
                         self.user_remaining_tokens = new_remaining_tokens
                 else:
