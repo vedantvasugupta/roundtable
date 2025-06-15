@@ -1,4 +1,4 @@
-import utils
+THIS SHOULD BE A LINTER ERRORimport utils
 import discord
 import asyncio
 from datetime import datetime, timezone
@@ -939,11 +939,11 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         results = await calculate_results(proposal_id)
 
         # Determine if proposal passed based on winner existence
-        status_determined = "Closed"  # Always use "Closed" as the final status
+        status_determined = "Passed" if results and results.get('winner') is not None else "Failed"
         print(f"DEBUG: Calculated status for proposal {proposal_id}: {status_determined}")
 
-        # Always use "Closed" as the database status
-        db_status_to_set = "Closed"
+        # Map "Failed" to "Closed" for DB storage
+        db_status_to_set = "Closed" if status_determined == "Failed" else status_determined
 
         # Update the proposal status in the database
         await db.update_proposal_status(proposal_id, db_status_to_set)
@@ -954,10 +954,17 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         await db.store_proposal_results(proposal_id, results)
         print(f"DEBUG: Stored results for proposal {proposal_id}")
 
+        # Clear the tracking message ID so the periodic task doesn't try to update it
+        # await db.update_proposal(proposal_id, {'tracking_message_id': None}) # Or set to 0? Let's use None.
+        # Update: It seems better to leave the tracking message and update it once more showing "Voting Closed".
+        # The update_voting_message (or similar logic in announce) could handle this.
+        # Let's rely on the announce function to update the message.
+
         # Set flag for announcement pending
         # Use integer 1 for True in SQLite
         await db.update_proposal(proposal_id, {'results_pending_announcement': 1})
-        print(f"DEBUG: Set results_pending_announcement=1 for proposal {proposal_id}")
+        print(
+            f"DEBUG: Set results_pending_announcement=1 for proposal {proposal_id}")
 
         return results
 
@@ -969,7 +976,7 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         try:
             await db.update_proposal_status(proposal_id, "Closed") # Ensure it's a valid status
             await db.add_proposal_note(proposal_id, "closure_error", f"Critical error: {str(e)[:200]}")
-            # Set flag for announcement pending even on error
+            # Set flag for announcement pending error
             await db.update_proposal(proposal_id, {'results_pending_announcement': 1})
         except Exception as db_e:
             print(f"ERROR updating proposal {proposal_id} status after critical error: {db_e}")
@@ -1212,10 +1219,6 @@ async def close_and_announce_results(guild: discord.Guild, proposal: Dict, resul
         # Mark the announcement as complete in the database
         await db.update_proposal(proposal_id, {'results_pending_announcement': 0})
         print(f"DEBUG: Cleared results_pending_announcement=0 for proposal {proposal_id}")
-
-        # Check if this completes a campaign and announce if so
-        if is_campaign_scenario:
-            await check_and_announce_campaign_completion(guild, campaign_id)
 
         print(f"✅ Results for proposal #{proposal_id} have been announced successfully")
         return True
@@ -1863,7 +1866,7 @@ async def check_and_announce_campaign_completion(guild: discord.Guild, campaign_
             return False
         
         # Count completed scenarios (Passed or Failed status)
-        completed_scenarios = [s for s in campaign_scenarios if s.get('status') in ['Closed']]
+        completed_scenarios = [s for s in campaign_scenarios if s.get('status') in ['Passed', 'Failed', 'Closed']]
         total_scenarios = len(campaign_scenarios)
         expected_scenarios = campaign.get('num_expected_scenarios', total_scenarios)
         

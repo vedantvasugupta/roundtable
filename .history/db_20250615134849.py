@@ -1913,11 +1913,12 @@ async def get_constitutional_variables(server_id: int) -> Dict[str, Dict[str, An
 
 async def get_proposal_results_json(proposal_id: int) -> Optional[str]:
     """Retrieve the JSON string of results for a proposal."""
-    async with get_db() as db:
+    async with aiosqlite.connect(DB_NAME) as db:
         try:
-            async with db.execute("SELECT results FROM proposal_results WHERE proposal_id = ?", (proposal_id,)) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row and row[0] else None
+            cursor = await db.execute("SELECT results_json FROM proposal_results WHERE proposal_id = ?", (proposal_id,))
+            row = await cursor.fetchone()
+            await cursor.close()
+            return row[0] if row and row[0] else None
         except Exception as e:
             print(f"Error getting proposal results JSON for P#{proposal_id}: {e}")
             return None

@@ -1,4 +1,4 @@
-import utils
+THIS SHOULD BE A LINTER ERRORimport utils
 import discord
 import asyncio
 from datetime import datetime, timezone
@@ -939,11 +939,11 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         results = await calculate_results(proposal_id)
 
         # Determine if proposal passed based on winner existence
-        status_determined = "Closed"  # Always use "Closed" as the final status
+        status_determined = "Passed" if results and results.get('winner') is not None else "Failed"
         print(f"DEBUG: Calculated status for proposal {proposal_id}: {status_determined}")
 
-        # Always use "Closed" as the database status
-        db_status_to_set = "Closed"
+        # Map "Failed" to "Closed" for DB storage
+        db_status_to_set = "Closed" if status_determined == "Failed" else status_determined
 
         # Update the proposal status in the database
         await db.update_proposal_status(proposal_id, db_status_to_set)
@@ -954,10 +954,17 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         await db.store_proposal_results(proposal_id, results)
         print(f"DEBUG: Stored results for proposal {proposal_id}")
 
+        # Clear the tracking message ID so the periodic task doesn't try to update it
+        # await db.update_proposal(proposal_id, {'tracking_message_id': None}) # Or set to 0? Let's use None.
+        # Update: It seems better to leave the tracking message and update it once more showing "Voting Closed".
+        # The update_voting_message (or similar logic in announce) could handle this.
+        # Let's rely on the announce function to update the message.
+
         # Set flag for announcement pending
         # Use integer 1 for True in SQLite
         await db.update_proposal(proposal_id, {'results_pending_announcement': 1})
-        print(f"DEBUG: Set results_pending_announcement=1 for proposal {proposal_id}")
+        print(
+            f"DEBUG: Set results_pending_announcement=1 for proposal {proposal_id}")
 
         return results
 
@@ -969,7 +976,7 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         try:
             await db.update_proposal_status(proposal_id, "Closed") # Ensure it's a valid status
             await db.add_proposal_note(proposal_id, "closure_error", f"Critical error: {str(e)[:200]}")
-            # Set flag for announcement pending even on error
+            # Set flag for announcement pending error
             await db.update_proposal(proposal_id, {'results_pending_announcement': 1})
         except Exception as db_e:
             print(f"ERROR updating proposal {proposal_id} status after critical error: {db_e}")
@@ -1212,10 +1219,6 @@ async def close_and_announce_results(guild: discord.Guild, proposal: Dict, resul
         # Mark the announcement as complete in the database
         await db.update_proposal(proposal_id, {'results_pending_announcement': 0})
         print(f"DEBUG: Cleared results_pending_announcement=0 for proposal {proposal_id}")
-
-        # Check if this completes a campaign and announce if so
-        if is_campaign_scenario:
-            await check_and_announce_campaign_completion(guild, campaign_id)
 
         print(f"✅ Results for proposal #{proposal_id} have been announced successfully")
         return True
@@ -1846,232 +1849,3 @@ async def send_batched_campaign_dms(guild: discord.Guild, campaign_id: int, scen
 #     return members
 
 # Ensure other functions like format_vote_results, check_expired_proposals, etc. are below this
-
-
-async def check_and_announce_campaign_completion(guild: discord.Guild, campaign_id: int) -> bool:
-    """Check if a campaign is complete and announce final results if so"""
-    try:
-        campaign = await db.get_campaign(campaign_id)
-        if not campaign:
-            print(f"ERROR: Campaign C#{campaign_id} not found for completion check")
-            return False
-        
-        # Get all scenarios for this campaign
-        campaign_scenarios = await db.get_proposals_by_campaign_id(campaign_id)
-        if not campaign_scenarios:
-            print(f"DEBUG: No scenarios found for campaign C#{campaign_id}")
-            return False
-        
-        # Count completed scenarios (Passed or Failed status)
-        completed_scenarios = [s for s in campaign_scenarios if s.get('status') in ['Closed']]
-        total_scenarios = len(campaign_scenarios)
-        expected_scenarios = campaign.get('num_expected_scenarios', total_scenarios)
-        
-        print(f"DEBUG: Campaign C#{campaign_id} has {len(completed_scenarios)}/{expected_scenarios} scenarios completed")
-        
-        # Check if campaign is complete
-        is_complete = len(completed_scenarios) >= expected_scenarios
-        
-        if is_complete and campaign.get('status') != 'completed':
-            # Mark campaign as completed
-            await db.update_campaign_status(campaign_id, 'completed')
-            
-            # Calculate aggregate campaign results
-            aggregate_results = await calculate_campaign_aggregate_results(campaign_id, completed_scenarios)
-            
-            # Send campaign completion announcement
-            await announce_campaign_completion(guild, campaign, completed_scenarios, aggregate_results)
-            
-            # Update campaign control panel one final time
-            await update_campaign_control_panel_final(guild, campaign_id)
-            
-            print(f"✅ Campaign C#{campaign_id} marked as completed and announced")
-            return True
-        
-        return False
-        
-    except Exception as e:
-        print(f"ERROR checking campaign completion for C#{campaign_id}: {e}")
-        traceback.print_exc()
-        return False
-
-
-async def calculate_campaign_aggregate_results(campaign_id: int, completed_scenarios: List[Dict]) -> Dict:
-    """Calculate aggregate results for a completed campaign"""
-    try:
-        total_tokens_allocated = 0
-        total_votes_cast = 0
-        total_abstain_votes = 0
-        scenario_results = []
-        
-        for scenario in completed_scenarios:
-            proposal_id = scenario.get('proposal_id')
-            if not proposal_id:
-                continue
-                
-            # Get detailed results for this scenario
-            results_json = await db.get_proposal_results_json(proposal_id)
-            if results_json:
-                try:
-                    results = json.loads(results_json)
-                    
-                    # Aggregate token usage
-                    tokens_in_votes = results.get('total_weighted_votes', 0) or results.get('total_weighted_vote_power', 0) or results.get('total_weighted_voting_power', 0) or results.get('total_weighted_ballot_power', 0)
-                    tokens_in_abstain = results.get('tokens_in_abstain_votes', 0)
-                    
-                    total_tokens_allocated += tokens_in_votes + tokens_in_abstain
-                    
-                    # Aggregate vote counts
-                    raw_votes = results.get('total_raw_votes', 0) or results.get('total_raw_vote_sets', 0) or results.get('total_raw_voters', 0) or results.get('total_raw_ballots', 0)
-                    abstain_votes = results.get('num_abstain_votes', 0)
-                    
-                    total_votes_cast += raw_votes
-                    total_abstain_votes += abstain_votes
-                    
-                    # Store scenario summary
-                    scenario_summary = {
-                        'scenario_order': scenario.get('scenario_order'),
-                        'title': scenario.get('title'),
-                        'winner': results.get('winner'),
-                        'status': scenario.get('status'),
-                        'tokens_used': tokens_in_votes + tokens_in_abstain,
-                        'votes_cast': raw_votes,
-                        'mechanism': results.get('mechanism')
-                    }
-                    scenario_results.append(scenario_summary)
-                    
-                except json.JSONDecodeError:
-                    print(f"WARNING: Could not parse results for scenario P#{proposal_id}")
-        
-        return {
-            'campaign_id': campaign_id,
-            'total_scenarios': len(completed_scenarios),
-            'total_tokens_allocated': total_tokens_allocated,
-            'total_votes_cast': total_votes_cast,
-            'total_abstain_votes': total_abstain_votes,
-            'scenario_results': scenario_results,
-            'completion_timestamp': datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        print(f"ERROR calculating aggregate results for campaign C#{campaign_id}: {e}")
-        traceback.print_exc()
-        return {}
-
-
-async def announce_campaign_completion(guild: discord.Guild, campaign: Dict, completed_scenarios: List[Dict], aggregate_results: Dict):
-    """Announce the completion of a campaign with aggregate results"""
-    try:
-        campaign_id = campaign.get('campaign_id')
-        
-        # Create campaign completion embed
-        embed = discord.Embed(
-            title=f"🎉 Campaign Complete: {campaign.get('title', 'Untitled')}",
-            description=f"**Campaign C#{campaign_id}** has concluded with all scenarios completed!",
-            color=discord.Color.gold()
-        )
-        
-        # Add campaign metadata
-        creator = guild.get_member(campaign.get('creator_id'))
-        embed.add_field(name="Creator", value=creator.mention if creator else f"ID: {campaign.get('creator_id')}", inline=True)
-        embed.add_field(name="Total Scenarios", value=str(aggregate_results.get('total_scenarios', 0)), inline=True)
-        embed.add_field(name="Campaign Duration", value="Completed", inline=True)
-        
-        # Add aggregate statistics
-        embed.add_field(name="💰 Total Tokens Allocated", value=str(aggregate_results.get('total_tokens_allocated', 0)), inline=True)
-        embed.add_field(name="🗳️ Total Votes Cast", value=str(aggregate_results.get('total_votes_cast', 0)), inline=True)
-        embed.add_field(name="🚫 Total Abstain Votes", value=str(aggregate_results.get('total_abstain_votes', 0)), inline=True)
-        
-        # Add scenario summaries
-        scenario_summary = ""
-        for scenario in aggregate_results.get('scenario_results', []):
-            outcome_emoji = "🏆" if scenario.get('winner') else "❌"
-            scenario_summary += f"**S{scenario.get('scenario_order')}:** {scenario.get('title')[:30]}{'...' if len(scenario.get('title', '')) > 30 else ''}\n"
-            scenario_summary += f"  {outcome_emoji} {scenario.get('winner', 'No winner')} ({scenario.get('tokens_used', 0)} tokens)\n\n"
-        
-        if scenario_summary:
-            embed.add_field(name="📋 Scenario Results", value=scenario_summary[:1024], inline=False)
-        
-        # Add footer
-        embed.set_footer(text=f"Campaign completed at {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
-        
-        # Send to campaign-management channel
-        campaign_mgmt_channel_name = CHANNELS.get("campaign_management", "campaign-management")
-        campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-        
-        if campaign_mgmt_channel:
-            completion_announcement = f"🎉 **CAMPAIGN COMPLETED**\n\n"
-            completion_announcement += f"**{campaign.get('title', 'Untitled')}** (C#{campaign_id}) has finished!\n"
-            completion_announcement += f"All {aggregate_results.get('total_scenarios', 0)} scenarios have been completed.\n\n"
-            completion_announcement += f"📊 **Final Statistics:**\n"
-            completion_announcement += f"• Total Tokens Used: {aggregate_results.get('total_tokens_allocated', 0)}\n"
-            completion_announcement += f"• Total Votes Cast: {aggregate_results.get('total_votes_cast', 0)}\n"
-            completion_announcement += f"• Participation: {aggregate_results.get('total_votes_cast', 0) + aggregate_results.get('total_abstain_votes', 0)} total participants\n"
-            
-            await campaign_mgmt_channel.send(completion_announcement, embed=embed)
-            print(f"✅ Campaign completion announcement sent for C#{campaign_id}")
-        
-        # Also send to voting-room
-        voting_channel = discord.utils.get(guild.text_channels, name="voting-room")
-        if voting_channel:
-            brief_announcement = f"🎉 **Campaign Complete:** {campaign.get('title', 'Untitled')} (C#{campaign_id})\n"
-            brief_announcement += f"All scenarios finished! Check <#{campaign_mgmt_channel.id}> for details." if campaign_mgmt_channel else "All scenarios finished!"
-            
-            await voting_channel.send(brief_announcement)
-            print(f"✅ Brief campaign completion announcement sent to voting-room for C#{campaign_id}")
-        
-        # Notify campaign creator via DM
-        try:
-            creator = guild.get_member(campaign.get('creator_id'))
-            if creator:
-                dm_message = f"🎉 Your campaign **{campaign.get('title', 'Untitled')}** (C#{campaign_id}) has been completed!\n\n"
-                dm_message += f"All {aggregate_results.get('total_scenarios', 0)} scenarios have finished voting."
-                await creator.send(dm_message, embed=embed)
-                print(f"✅ Campaign completion DM sent to creator for C#{campaign_id}")
-        except Exception as e:
-            print(f"ERROR sending campaign completion DM: {e}")
-        
-    except Exception as e:
-        print(f"ERROR announcing campaign completion for C#{campaign_id}: {e}")
-        traceback.print_exc()
-
-
-async def update_campaign_control_panel_final(guild: discord.Guild, campaign_id: int):
-    """Update the campaign control panel to show final completed state"""
-    try:
-        campaign = await db.get_campaign(campaign_id)
-        if not campaign or not campaign.get('control_message_id'):
-            return
-        
-        campaign_mgmt_channel_name = CHANNELS.get("campaign_management", "campaign-management")
-        campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-        
-        if not campaign_mgmt_channel:
-            return
-        
-        try:
-            control_message = await campaign_mgmt_channel.fetch_message(campaign['control_message_id'])
-            if control_message:
-                # Create final completed embed
-                creator = guild.get_member(campaign['creator_id'])
-                embed_title = f"✅ Campaign Completed: '{campaign['title']}' (ID: C#{campaign_id})"
-                embed_desc = f"**Creator:** {creator.mention if creator else f'ID: {campaign['creator_id']}'}\n"
-                embed_desc += f"**Description:** {campaign['description'] or 'Not provided.'}\n"
-                embed_desc += f"**Total Scenarios:** {campaign['num_expected_scenarios']}\n"
-                embed_desc += f"**All Scenarios Completed** ✅"
-                
-                completed_embed = discord.Embed(title=embed_title, description=embed_desc, color=discord.Color.gold())
-                completed_embed.add_field(name="Status", value="✅ Completed", inline=True)
-                completed_embed.add_field(name="Final Action", value="Campaign finished", inline=False)
-                completed_embed.set_footer(text=f"Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
-                
-                # Disable all buttons by passing None view
-                await control_message.edit(embed=completed_embed, view=None)
-                print(f"DEBUG: Updated campaign control panel to completed state for C#{campaign_id}")
-        except discord.NotFound:
-            print(f"DEBUG: Campaign control message not found for final update C#{campaign_id}")
-        except Exception as e:
-            print(f"ERROR updating final campaign control panel for C#{campaign_id}: {e}")
-        
-    except Exception as e:
-        print(f"ERROR in update_campaign_control_panel_final for C#{campaign_id}: {e}")

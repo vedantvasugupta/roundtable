@@ -681,173 +681,61 @@ async def calculate_results(proposal_id: int) -> Optional[Dict]:
 
 
 async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
-    """Format vote results into a Discord embed with enhanced visuals and campaign-specific handling"""
-    proposal_id = proposal.get('proposal_id') or proposal.get('id')  # Use .get() for safety
-    print(f"DEBUG: Formatting results for proposal #{proposal_id}")
-    
+    """Format vote results into a Discord embed with enhanced visuals"""
+    proposal_id = proposal.get('proposal_id') or proposal.get(
+        'id')  # Use .get() for safety
+    print(
+        f"DEBUG: Formatting results for proposal #{proposal_id}")
     mechanism = results.get('mechanism', 'Unknown').lower()
-    
-    # Check if this is a campaign scenario
-    campaign_id = proposal.get('campaign_id')
-    scenario_order = proposal.get('scenario_order')
-    is_campaign_scenario = campaign_id is not None
-    
-    # Determine color based on outcome
-    winner = results.get('winner')
-    if winner:
-        color = discord.Color.green()  # Success
-    elif results.get('reason_for_no_winner'):
-        if 'tie' in results.get('reason_for_no_winner', '').lower():
-            color = discord.Color.orange()  # Tie
-        else:
-            color = discord.Color.red()  # Failed/No winner
-    else:
-        color = discord.Color.light_grey()  # Unknown
+    total_votes_cast = results.get('total_votes', 0)
+    color = discord.Color.light_grey()  # Default to grey
 
-    # Create title based on whether it's a campaign scenario or standalone proposal
-    if is_campaign_scenario:
-        title = f"📊 Campaign Scenario Results"
-        description = f"**Campaign C#{campaign_id} - Scenario S#{scenario_order}**\n"
-        description += f"**{proposal.get('title', 'Untitled')}**\n\n"
-        description += f"{proposal.get('description', '')[:150]}{'...' if len(proposal.get('description', '')) > 150 else ''}"
-    else:
-        title = f"📊 Results for Proposal #{proposal_id}"
-        description = f"**{proposal.get('title', 'Untitled')}**\n\n"
-        description += f"{proposal.get('description', '')[:200]}{'...' if len(proposal.get('description', '')) > 200 else ''}"
+    embed = discord.Embed(
+        title=f"📊 Results for Proposal #{proposal_id}",
+        description=f"**{proposal.get('title', 'Untitled')}**\n\n{proposal.get('description', '')[:200]}...",
+        color=color
+    )
 
-    embed = discord.Embed(title=title, description=description, color=color)
-
-    # Add proposal metadata with campaign context
-    if is_campaign_scenario:
-        embed.add_field(name="Campaign ID", value=f"C#{campaign_id}", inline=True)
-        embed.add_field(name="Scenario", value=f"S#{scenario_order}", inline=True)
-        embed.add_field(name="Proposal ID", value=f"P#{proposal_id}", inline=True)
-    else:
-        embed.add_field(name="Proposal ID", value=f"P#{proposal_id}", inline=True)
-        embed.add_field(name="Proposer", value=f"<@{proposal.get('proposer_id')}>", inline=True)
-    
+    # Add proposal metadata
     embed.add_field(name="Voting Mechanism", value=mechanism.title(), inline=True)
+    embed.add_field(name="Total Votes", value=str(total_votes_cast), inline=True)
+    embed.add_field(name="Abstain Votes", value=str(results.get('num_abstain_votes', 0)), inline=True)
+    embed.add_field(name="Tokens in Abstain", value=str(results.get('tokens_in_abstain_votes', 0)), inline=True)
+    embed.add_field(name="Options Used", value=", ".join(results.get('options_used_for_tally', [])), inline=False)
 
-    # Add token information for campaigns
-    if is_campaign_scenario:
-        # Get weight mode from hyperparameters
-        hyperparameters = proposal.get('hyperparameters', {})
-        if isinstance(hyperparameters, str):
-            try:
-                hyperparameters = json.loads(hyperparameters)
-            except json.JSONDecodeError:
-                hyperparameters = {}
-        
-        weight_mode = hyperparameters.get('weight_mode', 'equal')
-        embed.add_field(name="Token Weight Mode", value=weight_mode.title(), inline=True)
-        
-        # Add token statistics
-        tokens_in_votes = results.get('total_weighted_votes', 0) or results.get('total_weighted_vote_power', 0) or results.get('total_weighted_voting_power', 0) or results.get('total_weighted_ballot_power', 0)
-        tokens_in_abstain = results.get('tokens_in_abstain_votes', 0)
-        total_tokens_used = tokens_in_votes + tokens_in_abstain
-        
-        embed.add_field(name="Tokens in Votes", value=str(tokens_in_votes), inline=True)
-        embed.add_field(name="Tokens in Abstain", value=str(tokens_in_abstain), inline=True)
-        embed.add_field(name="Total Tokens Used", value=str(total_tokens_used), inline=True)
-
-    # Add basic vote counts
-    raw_votes = results.get('total_raw_votes', 0) or results.get('total_raw_vote_sets', 0) or results.get('total_raw_voters', 0) or results.get('total_raw_ballots', 0)
-    abstain_votes = results.get('num_abstain_votes', 0)
-    
-    embed.add_field(name="Total Votes", value=str(raw_votes), inline=True)
-    embed.add_field(name="Abstain Votes", value=str(abstain_votes), inline=True)
-
-    # Add winner/outcome
-    if winner:
-        embed.add_field(name="🏆 Winner", value=winner, inline=False)
-    elif results.get('reason_for_no_winner'):
-        embed.add_field(name="❌ No Winner", value=results.get('reason_for_no_winner'), inline=False)
-
-    # Add mechanism-specific details with enhanced token weight display
-    if mechanism == 'plurality':
-        total_weighted_votes = results.get('total_weighted_votes', 0)
-        embed.add_field(name="Total Weighted Votes", value=str(total_weighted_votes), inline=True)
-        
-        # Enhanced vote display for campaigns
-        if is_campaign_scenario and results.get('results_detailed'):
-            vote_display = "**Option (Weighted Votes | Raw Votes)**\n"
-            for option, details in results['results_detailed']:
-                weighted = details.get('weighted_votes', 0)
-                raw = details.get('raw_votes', 0)
-                percentage = (weighted / total_weighted_votes * 100) if total_weighted_votes > 0 else 0
-                vote_display += f"• {option}: **{weighted:.1f}** | {raw} ({percentage:.1f}%)\n"
-        else:
-            vote_display = "\n".join([f"• {option}: {details['weighted_votes']:.1f} ({details['raw_votes']} raw)" 
-                                    for option, details in results.get('results_detailed', [])])
-        
-        if vote_display:
-            embed.add_field(name="Vote Breakdown", value=vote_display[:1024], inline=False)
-
-    elif mechanism == 'borda':
-        total_weighted_power = results.get('total_weighted_vote_power', 0)
-        embed.add_field(name="Total Weighted Vote Power", value=str(total_weighted_power), inline=True)
-        
-        if is_campaign_scenario and results.get('results_detailed'):
-            score_display = "**Option (Weighted Score | Raw Score)**\n"
-            for option, details in results['results_detailed']:
-                weighted = details.get('weighted_score', 0)
-                raw = details.get('raw_score', 0)
-                percentage = (weighted / total_weighted_power * 100) if total_weighted_power > 0 else 0
-                score_display += f"• {option}: **{weighted:.1f}** | {raw} ({percentage:.1f}%)\n"
-        else:
-            score_display = "\n".join([f"• {option}: {details['weighted_score']:.1f} ({details['raw_score']} raw)" 
-                                     for option, details in results.get('results_detailed', [])])
-        
-        if score_display:
-            embed.add_field(name="Borda Scores", value=score_display[:1024], inline=False)
-
-    elif mechanism == 'approval':
-        total_weighted_power = results.get('total_weighted_voting_power', 0)
-        embed.add_field(name="Total Weighted Voting Power", value=str(total_weighted_power), inline=True)
-        
-        if is_campaign_scenario and results.get('results_detailed'):
-            approval_display = "**Option (Weighted Approvals | Raw Approvals)**\n"
-            for option, details in results['results_detailed']:
-                weighted = details.get('weighted_approvals', 0)
-                raw = details.get('raw_approvals', 0)
-                percentage = (weighted / total_weighted_power * 100) if total_weighted_power > 0 else 0
-                approval_display += f"• {option}: **{weighted:.1f}** | {raw} ({percentage:.1f}%)\n"
-        else:
-            approval_display = "\n".join([f"• {option}: {details['weighted_approvals']:.1f} ({details['raw_approvals']} raw)" 
-                                        for option, details in results.get('results_detailed', [])])
-        
-        if approval_display:
-            embed.add_field(name="Approval Counts", value=approval_display[:1024], inline=False)
-
-    elif mechanism == 'runoff':
-        rounds_count = len(results.get('rounds_detailed', []))
-        total_weighted_power = results.get('total_weighted_ballot_power', 0)
-        embed.add_field(name="Rounds Conducted", value=str(rounds_count), inline=True)
-        embed.add_field(name="Total Weighted Ballot Power", value=str(total_weighted_power), inline=True)
-        
-        # Show final round results for campaigns
-        if is_campaign_scenario and results.get('rounds_detailed'):
-            final_round = results['rounds_detailed'][-1]
-            final_round_display = f"**Final Round ({final_round.get('round_number', '?')})**\n"
-            for option, weighted_votes in final_round.get('weighted_votes_per_option', {}).items():
-                raw_votes = final_round.get('raw_ballots_per_option', {}).get(option, 0)
-                final_round_display += f"• {option}: **{weighted_votes:.1f}** | {raw_votes}\n"
-            embed.add_field(name="Final Round Results", value=final_round_display[:1024], inline=False)
-
-    elif mechanism == 'dhondt':
-        seats_allocated = results.get('num_seats_configured', 1)
-        total_weighted_power = results.get('total_weighted_vote_power', 0)
-        embed.add_field(name="Seats Allocated", value=str(seats_allocated), inline=True)
-        embed.add_field(name="Total Weighted Vote Power", value=str(total_weighted_power), inline=True)
-
-    # Add footer with timestamp and campaign context
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M UTC')
-    if is_campaign_scenario:
-        footer_text = f"Campaign C#{campaign_id} • Scenario S#{scenario_order} • Calculated at {timestamp}"
+    # Add results
+    if results.get('winner'):
+        embed.add_field(name="Winner", value=results.get('winner'), inline=True)
+        embed.add_field(name="Reason", value=results.get('reason_for_no_winner'), inline=True)
     else:
-        footer_text = f"Proposal P#{proposal_id} • Calculated at {timestamp}"
-    
-    embed.set_footer(text=footer_text)
+        embed.add_field(name="No Winner", value=results.get('reason_for_no_winner'), inline=True)
+
+    # Add mechanism-specific details
+    if mechanism == 'plurality':
+        embed.add_field(name="Winning Threshold", value=f"{results.get('winning_threshold_percentage', 'N/A')}% of weighted votes", inline=True)
+        embed.add_field(name="Total Weighted Votes", value=str(results.get('total_weighted_votes', 0)), inline=True)
+        embed.add_field(name="Vote Counts (Weighted)", value="\n".join([f"• {option}: {details['weighted_votes']:.2f} ({details['raw_votes']} raw)" for option, details in results['results_detailed']]), inline=False)
+    elif mechanism == 'borda':
+        embed.add_field(name="Total Raw Vote Sets", value=str(results.get('total_raw_vote_sets', 0)), inline=True)
+        embed.add_field(name="Total Weighted Vote Power", value=str(results.get('total_weighted_vote_power', 0)), inline=True)
+        embed.add_field(name="Borda Scores (Weighted)", value="\n".join([f"• {option}: {details['weighted_score']:.2f} ({details['raw_score']} raw)" for option, details in results['results_detailed']]), inline=False)
+    elif mechanism == 'approval':
+        embed.add_field(name="Total Raw Voters", value=str(results.get('total_raw_voters', 0)), inline=True)
+        embed.add_field(name="Total Weighted Voting Power", value=str(results.get('total_weighted_voting_power', 0)), inline=True)
+        embed.add_field(name="Approval Counts (Weighted)", value="\n".join([f"• {option}: {details['weighted_approvals']:.2f} ({details['raw_approvals']} raw)" for option, details in results['results_detailed']]), inline=False)
+    elif mechanism == 'runoff':
+        embed.add_field(name="Rounds Conducted", value=str(len(results.get('rounds_detailed', []))), inline=True)
+        embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
+        embed.add_field(name="Total Weighted Ballot Power", value=str(results.get('total_weighted_ballot_power', 0)), inline=True)
+        embed.add_field(name="Round Details", value="\n".join([f"**Round {round_num}**\n" + round_text for round_num, round_text in enumerate(results['rounds_detailed'], 1)]), inline=False)
+    elif mechanism == 'dhondt':
+        embed.add_field(name="Seats to Allocate", value=str(results.get('num_seats_configured', 1)), inline=True)
+        embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
+        embed.add_field(name="Total Weighted Vote Power", value=str(results.get('total_weighted_vote_power', 0)), inline=True)
+        embed.add_field(name="Seat Allocation", value="\n".join([f"• {option}: {num_seats} ({party_total_w:.2f} weighted / {party_total_r} raw)" for option, num_seats, party_total_w, party_total_r in zip(results['options_ranked'], results['seats_allocated_detailed'].values(), results['party_totals_detailed'].values(), results['party_totals_detailed'].values())]), inline=False)
+
+    # Add footer
+    embed.set_footer(text=f"Results for Proposal #{proposal_id} | Calculated at {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
     return embed
 
 
@@ -939,11 +827,11 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         results = await calculate_results(proposal_id)
 
         # Determine if proposal passed based on winner existence
-        status_determined = "Closed"  # Always use "Closed" as the final status
+        status_determined = "Passed" if results and results.get('winner') is not None else "Failed"
         print(f"DEBUG: Calculated status for proposal {proposal_id}: {status_determined}")
 
-        # Always use "Closed" as the database status
-        db_status_to_set = "Closed"
+        # Map "Failed" to "Closed" for DB storage
+        db_status_to_set = "Closed" if status_determined == "Failed" else status_determined
 
         # Update the proposal status in the database
         await db.update_proposal_status(proposal_id, db_status_to_set)
@@ -954,10 +842,17 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         await db.store_proposal_results(proposal_id, results)
         print(f"DEBUG: Stored results for proposal {proposal_id}")
 
+        # Clear the tracking message ID so the periodic task doesn't try to update it
+        # await db.update_proposal(proposal_id, {'tracking_message_id': None}) # Or set to 0? Let's use None.
+        # Update: It seems better to leave the tracking message and update it once more showing "Voting Closed".
+        # The update_voting_message (or similar logic in announce) could handle this.
+        # Let's rely on the announce function to update the message.
+
         # Set flag for announcement pending
         # Use integer 1 for True in SQLite
         await db.update_proposal(proposal_id, {'results_pending_announcement': 1})
-        print(f"DEBUG: Set results_pending_announcement=1 for proposal {proposal_id}")
+        print(
+            f"DEBUG: Set results_pending_announcement=1 for proposal {proposal_id}")
 
         return results
 
@@ -969,7 +864,7 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         try:
             await db.update_proposal_status(proposal_id, "Closed") # Ensure it's a valid status
             await db.add_proposal_note(proposal_id, "closure_error", f"Critical error: {str(e)[:200]}")
-            # Set flag for announcement pending even on error
+            # Set flag for announcement pending error
             await db.update_proposal(proposal_id, {'results_pending_announcement': 1})
         except Exception as db_e:
             print(f"ERROR updating proposal {proposal_id} status after critical error: {db_e}")
@@ -977,175 +872,104 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
 
 
 async def close_and_announce_results(guild: discord.Guild, proposal: Dict, results: Dict) -> bool:
-    """Announce the results of a closed proposal with enhanced visuals and campaign-specific handling"""
+    """Announce the results of a closed proposal with enhanced visuals"""
     try:
-        print(f"DEBUG: Starting close_and_announce_results for proposal #{proposal.get('proposal_id')}")
+        print(
+            f"DEBUG: Starting close_and_announce_results for proposal #{proposal.get('proposal_id')}")
 
         if not results:
             print(f"DEBUG: No results provided for announcement of proposal #{proposal.get('proposal_id')}. Skipping announcement.")
             return False
 
         proposal_id = proposal.get('proposal_id')
-        campaign_id = proposal.get('campaign_id')
-        scenario_order = proposal.get('scenario_order')
-        is_campaign_scenario = campaign_id is not None
 
         # Format results into an embed
         embed = await format_vote_results(results, proposal)
         print(f"DEBUG: Formatted results embed for proposal #{proposal_id}")
 
-        # Determine announcement channels based on whether it's a campaign scenario
-        if is_campaign_scenario:
-            # For campaigns, prioritize campaign-management channel
-            campaign_mgmt_channel_name = CHANNELS.get("campaign_management", "campaign-management")
-            campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-            
-            # Also get vote-results for detailed results
-            vote_results_channel = discord.utils.get(guild.text_channels, name="vote-results")
-            if not vote_results_channel:
-                try:
-                    print(f"DEBUG: Creating vote-results channel for campaign scenario results")
-                    overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
-                        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-                    }
-                    vote_results_channel = await guild.create_text_channel(name="vote-results", overwrites=overwrites)
-                    await vote_results_channel.send("📊 **Vote Results Channel**\nThis channel displays the results of completed votes.")
-                except Exception as e:
-                    print(f"ERROR creating vote-results channel: {e}")
-                    vote_results_channel = None
-        else:
-            # For standalone proposals, use standard channels
-            vote_results_channel = discord.utils.get(guild.text_channels, name="vote-results")
-            if not vote_results_channel:
-                try:
-                    print(f"DEBUG: Creating vote-results channel for guild {guild.name}")
-                    overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
-                        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-                    }
-                    vote_results_channel = await guild.create_text_channel(name="vote-results", overwrites=overwrites)
-                    await vote_results_channel.send("📊 **Vote Results Channel**\nThis channel displays the results of completed votes.")
-                except Exception as e:
-                    print(f"ERROR creating vote-results channel: {e}")
-                    vote_results_channel = None
-
-            # Fallback to governance-results
-            governance_results_channel = discord.utils.get(guild.text_channels, name="governance-results")
-            if not governance_results_channel and not vote_results_channel:
-                try:
-                    governance_results_channel = await guild.create_text_channel("governance-results")
-                    await governance_results_channel.send("📊 **Governance Results Channel**\nThis channel shows the results of completed governance votes.")
-                except Exception as e:
-                    print(f"ERROR creating governance-results channel: {e}")
-                    governance_results_channel = None
-
-        # Send detailed results to vote-results channel
-        if vote_results_channel:
+        # First try to get the dedicated vote-results channel
+        vote_results_channel = discord.utils.get(
+            guild.text_channels, name="vote-results")
+        if not vote_results_channel:
+            # Try to create the vote-results channel
             try:
-                await vote_results_channel.send(embed=embed)
-                print(f"✅ Detailed results sent to {vote_results_channel.name} channel for proposal #{proposal_id}")
+                print(
+                    f"DEBUG: Creating vote-results channel for guild {guild.name}")
+                # Define permission overwrites: Everyone can read, but only the bot can send messages
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(read_messages=True, send_messages=False),
+                    guild.me: discord.PermissionOverwrite(
+                        read_messages=True, send_messages=True)
+                }
+
+                vote_results_channel = await guild.create_text_channel(name="vote-results", overwrites=overwrites)
+                await vote_results_channel.send("📊 **Vote Results Channel**\nThis channel displays the results of completed votes.")
+                print(f"DEBUG: Created vote-results channel in {guild.name}")
             except Exception as e:
-                print(f"ERROR sending results to {vote_results_channel.name}: {e}")
-                await vote_results_channel.send(f"📊 **Proposal #{proposal_id}: Voting has concluded.** Status: {proposal.get('status', 'Unknown').lower()}. Results could not be fully formatted.")
+                print(f"ERROR creating vote-results channel: {e}")
+                import traceback
+                traceback.print_exc()
+                vote_results_channel = None
 
-        # Campaign-specific announcements
-        if is_campaign_scenario:
-            # Send campaign-specific announcement to campaign-management channel
-            if campaign_mgmt_channel:
-                try:
-                    campaign_announcement = f"🎯 **CAMPAIGN SCENARIO COMPLETE**\n\n"
-                    campaign_announcement += f"**Campaign:** C#{campaign_id}\n"
-                    campaign_announcement += f"**Scenario:** S#{scenario_order} - {proposal.get('title', 'Untitled')}\n"
-                    campaign_announcement += f"**Proposal ID:** P#{proposal_id}\n\n"
-                    
-                    winner = results.get('winner')
-                    if winner:
-                        campaign_announcement += f"**🏆 Outcome:** {winner}\n"
-                    else:
-                        campaign_announcement += f"**❌ Outcome:** {results.get('reason_for_no_winner', 'No clear winner')}\n"
-                    
-                    # Add token usage summary for campaigns
-                    tokens_in_votes = results.get('total_weighted_votes', 0) or results.get('total_weighted_vote_power', 0) or results.get('total_weighted_voting_power', 0) or results.get('total_weighted_ballot_power', 0)
-                    tokens_in_abstain = results.get('tokens_in_abstain_votes', 0)
-                    campaign_announcement += f"**💰 Tokens Used:** {tokens_in_votes} in votes, {tokens_in_abstain} in abstain\n"
-                    
-                    if vote_results_channel and vote_results_channel.id != campaign_mgmt_channel.id:
-                        campaign_announcement += f"\n📊 View detailed results in <#{vote_results_channel.id}>"
-
-                    await campaign_mgmt_channel.send(campaign_announcement, embed=embed)
-                    print(f"✅ Campaign announcement sent to campaign-management channel for P#{proposal_id}")
-                except Exception as e:
-                    print(f"ERROR sending campaign announcement: {e}")
-
-            # Update campaign control panel if it exists
+        # Also get the governance-results channel as fallback
+        governance_results_channel = discord.utils.get(
+            guild.text_channels, name="governance-results")
+        if not governance_results_channel and not vote_results_channel:
+            # Try to create the governance-results channel as fallback
             try:
-                campaign = await db.get_campaign(campaign_id)
-                if campaign and campaign.get('control_message_id'):
-                    try:
-                        control_message = await campaign_mgmt_channel.fetch_message(campaign['control_message_id'])
-                        if control_message:
-                            # Import here to avoid circular imports
-                            from proposals import CampaignControlView
-                            
-                            # Update the control view
-                            new_control_view = CampaignControlView(campaign_id, guild.get_member(guild.me.id))
-                            await new_control_view.rebuild_view()
-                            
-                            # Update the embed as well
-                            updated_campaign = await db.get_campaign(campaign_id)
-                            creator = guild.get_member(updated_campaign['creator_id'])
-                            embed_title = f"Campaign Management: '{updated_campaign['title']}' (ID: C#{campaign_id})"
-                            embed_desc = f"**Creator:** {creator.mention if creator else f'ID: {updated_campaign['creator_id']}'}\n"
-                            embed_desc += f"**Description:** {updated_campaign['description'] or 'Not provided.'}\n"
-                            embed_desc += f"**Total Scenarios Expected:** {updated_campaign['num_expected_scenarios']}\n"
-                            embed_desc += f"**Currently Defined:** {updated_campaign['current_defined_scenarios']}\n"
-                            embed_desc += f"**Scenarios Completed:** {updated_campaign.get('scenarios_completed', 0)}"
-                            
-                            new_color = discord.Color.green() if updated_campaign['status'] == 'active' else discord.Color.blue()
-                            updated_embed = discord.Embed(title=embed_title, description=embed_desc, color=new_color)
-                            updated_embed.add_field(name="Status", value=updated_campaign['status'].title(), inline=True)
-                            updated_embed.add_field(name="Last Action", value=f"Scenario {scenario_order} completed", inline=False)
-                            updated_embed.set_footer(text=f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
-                            
-                            await control_message.edit(embed=updated_embed, view=new_control_view)
-                            print(f"DEBUG: Updated campaign control panel for completed scenario S#{scenario_order}")
-                    except discord.NotFound:
-                        print(f"DEBUG: Campaign control message not found for C#{campaign_id}")
-                    except Exception as e_update_control:
-                        print(f"ERROR: Failed to update campaign control panel for C#{campaign_id}: {e_update_control}")
-            except Exception as e_get_campaign:
-                print(f"ERROR: Failed to get campaign data for control panel update C#{campaign_id}: {e_get_campaign}")
+                governance_results_channel = await guild.create_text_channel("governance-results")
+                await governance_results_channel.send("📊 **Governance Results Channel**\nThis channel shows the results of completed governance votes.")
+                print(
+                    f"DEBUG: Created governance-results channel in {guild.name}")
+            except Exception as e:
+                print(f"ERROR creating governance-results channel: {e}")
+                import traceback
+                traceback.print_exc()
+                governance_results_channel = None
 
-        # Always send results to the voting-room channel as well
-        voting_channel = discord.utils.get(guild.text_channels, name="voting-room")
+        # Use vote-results channel if available, otherwise use governance-results
+        results_channel = vote_results_channel or governance_results_channel
+
+        # Send results to the results channel
+        if results_channel:
+            try:
+                await results_channel.send(embed=embed)
+                print(
+                    f"✅ Results sent to {results_channel.name} channel for proposal #{proposal_id}")
+            except Exception as e:
+                print(f"ERROR sending results to {results_channel.name}: {e}")
+                import traceback
+                traceback.print_exc()
+                # Try a simpler message as fallback
+                await results_channel.send(f"📊 **Proposal #{proposal_id}: Voting has concluded.** Status: {proposal.get('status', 'Unknown').lower()}. Results could not be fully formatted.")
+
+        # Always send the results to the voting-room channel as well
+        voting_channel = discord.utils.get(
+            guild.text_channels, name="voting-room")
         if voting_channel:
             try:
-                # Create context-appropriate announcement message
-                if is_campaign_scenario:
-                    announcement = f"🎯 **CAMPAIGN SCENARIO COMPLETE: C#{campaign_id} - S#{scenario_order}**\n\n"
-                    announcement += f"**Scenario:** {proposal.get('title', 'Untitled')}\n"
-                    announcement += f"**Proposal ID:** P#{proposal_id}\n"
-                else:
-                    announcement = f"🔔 **VOTING COMPLETE: Proposal #{proposal_id}**\n\n"
-                    announcement += f"**Title:** {proposal.get('title', 'Untitled')}\n"
-                
+                # Create a special announcement message
+                announcement = f"🔔 **VOTING COMPLETE: Proposal #{proposal_id}**\n\n"
+                announcement += f"**Title:** {proposal.get('title', 'Untitled')}\n"
                 announcement += f"**Status:** {proposal.get('status', 'Unknown')}\n"
 
                 winner = results.get('winner')
-                if winner is not None:
+                if winner is not None:  # Use is not None to catch empty strings or 0 if that were possible
                     announcement += f"**Outcome:** 🏆 {winner}\n"
                 else:
-                    announcement += "**Outcome:** No clear winner.\n"
+                    announcement += "**Outcome:** No clear winner.\n"  # Or Failed message if status is Failed
 
-                if vote_results_channel and vote_results_channel.id != voting_channel.id:
-                    announcement += f"\nView detailed results in <#{vote_results_channel.id}>"
+                if results_channel and results_channel.id != voting_channel.id:
+                    announcement += f"\nView detailed results in <#{results_channel.id}>"
 
                 # Send the announcement and the embed
                 await voting_channel.send(announcement, embed=embed)
-                print(f"✅ Results announcement sent to voting-room channel for proposal #{proposal_id}")
+                print(
+                    f"✅ Results announcement sent to voting-room channel for proposal #{proposal_id}")
             except Exception as e:
                 print(f"ERROR sending results to voting-room: {e}")
+                import traceback
+                traceback.print_exc()
                 # Try a simpler message as fallback
                 await voting_channel.send(f"🔔 **VOTING COMPLETE: Proposal #{proposal_id}: Voting has concluded.** Status: {proposal.get('status', 'Unknown').lower()}.")
 
@@ -1155,30 +979,26 @@ async def close_and_announce_results(guild: discord.Guild, proposal: Dict, resul
             try:
                 main_voting_message = await voting_channel.fetch_message(main_voting_message_id)
                 # Update embed to show voting closed
-                old_embed = main_voting_message.embeds[0] if main_voting_message.embeds else discord.Embed()
-                
-                if is_campaign_scenario:
-                    old_embed.title = f"🔒 CLOSED: C#{campaign_id} - S#{scenario_order}"
-                else:
-                    old_embed.title = f"🔒 CLOSED: {proposal.get('title', 'Untitled')}"
-                
-                old_embed.description = proposal.get('description', '')[:200] + "..."
+                old_embed = main_voting_message.embeds[0] if main_voting_message.embeds else discord.Embed(
+                )
+                old_embed.title = f"🔒 CLOSED: {proposal.get('title', 'Untitled')}"  # Use proposal title in case old embed is empty
+                old_embed.description = proposal.get('description', '')[:200] + "..."  # Use proposal description
                 old_embed.color = discord.Color.dark_gray()
-                
-                if vote_results_channel:
-                    footer_text = f"Voting closed • See results in #{vote_results_channel.name}"
-                else:
-                    footer_text = "Voting closed"
+                footer_text = f"Voting closed • See results in #{results_channel.name if results_channel else 'results-channel'}"
                 old_embed.set_footer(text=footer_text)
 
                 # Disable any buttons by creating a new view with no items
                 await main_voting_message.edit(embed=old_embed, view=None)
-                print(f"✅ Updated main voting message {main_voting_message_id} to closed status.")
+                print(
+                    f"✅ Updated main voting message {main_voting_message_id} to closed status.")
 
             except discord.NotFound:
                 print(f"WARNING: Main voting message {main_voting_message_id} not found in voting-room.")
             except Exception as e:
-                print(f"ERROR updating main voting message {main_voting_message_id}: {e}")
+                print(
+                    f"ERROR updating main voting message {main_voting_message_id}: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Try to update the tracking message in voting-room to show final state (if it exists)
         tracking_message_id = proposal.get('tracking_message_id')
@@ -1186,47 +1006,58 @@ async def close_and_announce_results(guild: discord.Guild, proposal: Dict, resul
             try:
                 tracking_message = await voting_channel.fetch_message(tracking_message_id)
                 # Re-run the update_vote_tracking function one last time
-                await update_vote_tracking(guild, proposal_id)
-                print(f"✅ Attempted final update of tracking message {tracking_message_id}.")
+                # It will fetch latest vote data (already closed status), eligible voters, etc.
+                # And update the embed with final progress and closed state.
+                await update_vote_tracking(guild, proposal_id)  # This function sends OR edits
+
+                # If update_vote_tracking failed to find/edit, it would have sent a new one.
+                # If it succeeded in editing, the message is updated.
+
+                print(
+                    f"✅ Attempted final update of tracking message {tracking_message_id}.")
+
             except discord.NotFound:
                 print(f"WARNING: Tracking message {tracking_message_id} not found in voting-room.")
             except Exception as e:
-                print(f"ERROR attempting final update of tracking message {tracking_message_id}: {e}")
+                print(
+                    f"ERROR attempting final update of tracking message {tracking_message_id}: {e}")
+                import traceback
+                traceback.print_exc()
 
         # Attempt to notify the proposer via DM
         try:
             proposer = guild.get_member(proposal['proposer_id'])
             if proposer:
-                if is_campaign_scenario:
-                    dm_message = f"Your campaign scenario **{proposal.get('title', 'Untitled')}** (C#{campaign_id} - S#{scenario_order}) has concluded with the status: {proposal.get('status', 'Unknown').lower()}."
-                else:
-                    dm_message = f"Your proposal **{proposal.get('title', 'Untitled')}** has concluded with the status: {proposal.get('status', 'Unknown').lower()}."
-                
-                await proposer.send(dm_message, embed=embed)
+                await proposer.send(f"Your proposal **{proposal.get('title', 'Untitled')}** has concluded with the status: {proposal.get('status', 'Unknown').lower()}.", embed=embed)
                 print(f"✅ DM sent to proposer for proposal #{proposal_id}")
             else:
-                print(f"DEBUG: Could not find proposer with ID {proposal['proposer_id']} in guild {guild.name}")
+                print(
+                    f"DEBUG: Could not find proposer with ID {proposal['proposer_id']} in guild {guild.name}")
         except Exception as e:
             print(f"ERROR sending DM to proposer: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Mark the announcement as complete in the database
+        # Use integer 0 for False in SQLite
         await db.update_proposal(proposal_id, {'results_pending_announcement': 0})
-        print(f"DEBUG: Cleared results_pending_announcement=0 for proposal {proposal_id}")
+        print(
+            f"DEBUG: Cleared results_pending_announcement=0 for proposal {proposal_id}")
 
-        # Check if this completes a campaign and announce if so
-        if is_campaign_scenario:
-            await check_and_announce_campaign_completion(guild, campaign_id)
-
-        print(f"✅ Results for proposal #{proposal_id} have been announced successfully")
+        print(
+            f"✅ Results for proposal #{proposal_id} have been announced successfully")
         return True
     except Exception as e:
-        print(f"CRITICAL ERROR in close_and_announce_results for proposal #{proposal.get('proposal_id')}: {e}")
-        traceback.print_exc()
+        print(
+            f"CRITICAL ERROR in close_and_announce_results for proposal #{proposal.get('proposal_id')}: {e}")
+        import traceback
+        traceback.print_exc()  # Print full stack trace for debugging
         # Even on failure, try to clear the pending announcement flag to avoid spamming errors
         if proposal.get('proposal_id'):
             try:
                  await db.update_proposal(proposal['proposal_id'], {'results_pending_announcement': 0})
-                 print(f"DEBUG: Attempted to clear pending announcement flag for proposal {proposal.get('proposal_id')} after error.")
+                 print(
+                     f"DEBUG: Attempted to clear pending announcement flag for proposal {proposal.get('proposal_id')} after error.")
             except Exception as db_e:
                 print(f"ERROR clearing pending announcement flag after error: {db_e}")
         return False
@@ -1846,232 +1677,3 @@ async def send_batched_campaign_dms(guild: discord.Guild, campaign_id: int, scen
 #     return members
 
 # Ensure other functions like format_vote_results, check_expired_proposals, etc. are below this
-
-
-async def check_and_announce_campaign_completion(guild: discord.Guild, campaign_id: int) -> bool:
-    """Check if a campaign is complete and announce final results if so"""
-    try:
-        campaign = await db.get_campaign(campaign_id)
-        if not campaign:
-            print(f"ERROR: Campaign C#{campaign_id} not found for completion check")
-            return False
-        
-        # Get all scenarios for this campaign
-        campaign_scenarios = await db.get_proposals_by_campaign_id(campaign_id)
-        if not campaign_scenarios:
-            print(f"DEBUG: No scenarios found for campaign C#{campaign_id}")
-            return False
-        
-        # Count completed scenarios (Passed or Failed status)
-        completed_scenarios = [s for s in campaign_scenarios if s.get('status') in ['Closed']]
-        total_scenarios = len(campaign_scenarios)
-        expected_scenarios = campaign.get('num_expected_scenarios', total_scenarios)
-        
-        print(f"DEBUG: Campaign C#{campaign_id} has {len(completed_scenarios)}/{expected_scenarios} scenarios completed")
-        
-        # Check if campaign is complete
-        is_complete = len(completed_scenarios) >= expected_scenarios
-        
-        if is_complete and campaign.get('status') != 'completed':
-            # Mark campaign as completed
-            await db.update_campaign_status(campaign_id, 'completed')
-            
-            # Calculate aggregate campaign results
-            aggregate_results = await calculate_campaign_aggregate_results(campaign_id, completed_scenarios)
-            
-            # Send campaign completion announcement
-            await announce_campaign_completion(guild, campaign, completed_scenarios, aggregate_results)
-            
-            # Update campaign control panel one final time
-            await update_campaign_control_panel_final(guild, campaign_id)
-            
-            print(f"✅ Campaign C#{campaign_id} marked as completed and announced")
-            return True
-        
-        return False
-        
-    except Exception as e:
-        print(f"ERROR checking campaign completion for C#{campaign_id}: {e}")
-        traceback.print_exc()
-        return False
-
-
-async def calculate_campaign_aggregate_results(campaign_id: int, completed_scenarios: List[Dict]) -> Dict:
-    """Calculate aggregate results for a completed campaign"""
-    try:
-        total_tokens_allocated = 0
-        total_votes_cast = 0
-        total_abstain_votes = 0
-        scenario_results = []
-        
-        for scenario in completed_scenarios:
-            proposal_id = scenario.get('proposal_id')
-            if not proposal_id:
-                continue
-                
-            # Get detailed results for this scenario
-            results_json = await db.get_proposal_results_json(proposal_id)
-            if results_json:
-                try:
-                    results = json.loads(results_json)
-                    
-                    # Aggregate token usage
-                    tokens_in_votes = results.get('total_weighted_votes', 0) or results.get('total_weighted_vote_power', 0) or results.get('total_weighted_voting_power', 0) or results.get('total_weighted_ballot_power', 0)
-                    tokens_in_abstain = results.get('tokens_in_abstain_votes', 0)
-                    
-                    total_tokens_allocated += tokens_in_votes + tokens_in_abstain
-                    
-                    # Aggregate vote counts
-                    raw_votes = results.get('total_raw_votes', 0) or results.get('total_raw_vote_sets', 0) or results.get('total_raw_voters', 0) or results.get('total_raw_ballots', 0)
-                    abstain_votes = results.get('num_abstain_votes', 0)
-                    
-                    total_votes_cast += raw_votes
-                    total_abstain_votes += abstain_votes
-                    
-                    # Store scenario summary
-                    scenario_summary = {
-                        'scenario_order': scenario.get('scenario_order'),
-                        'title': scenario.get('title'),
-                        'winner': results.get('winner'),
-                        'status': scenario.get('status'),
-                        'tokens_used': tokens_in_votes + tokens_in_abstain,
-                        'votes_cast': raw_votes,
-                        'mechanism': results.get('mechanism')
-                    }
-                    scenario_results.append(scenario_summary)
-                    
-                except json.JSONDecodeError:
-                    print(f"WARNING: Could not parse results for scenario P#{proposal_id}")
-        
-        return {
-            'campaign_id': campaign_id,
-            'total_scenarios': len(completed_scenarios),
-            'total_tokens_allocated': total_tokens_allocated,
-            'total_votes_cast': total_votes_cast,
-            'total_abstain_votes': total_abstain_votes,
-            'scenario_results': scenario_results,
-            'completion_timestamp': datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        print(f"ERROR calculating aggregate results for campaign C#{campaign_id}: {e}")
-        traceback.print_exc()
-        return {}
-
-
-async def announce_campaign_completion(guild: discord.Guild, campaign: Dict, completed_scenarios: List[Dict], aggregate_results: Dict):
-    """Announce the completion of a campaign with aggregate results"""
-    try:
-        campaign_id = campaign.get('campaign_id')
-        
-        # Create campaign completion embed
-        embed = discord.Embed(
-            title=f"🎉 Campaign Complete: {campaign.get('title', 'Untitled')}",
-            description=f"**Campaign C#{campaign_id}** has concluded with all scenarios completed!",
-            color=discord.Color.gold()
-        )
-        
-        # Add campaign metadata
-        creator = guild.get_member(campaign.get('creator_id'))
-        embed.add_field(name="Creator", value=creator.mention if creator else f"ID: {campaign.get('creator_id')}", inline=True)
-        embed.add_field(name="Total Scenarios", value=str(aggregate_results.get('total_scenarios', 0)), inline=True)
-        embed.add_field(name="Campaign Duration", value="Completed", inline=True)
-        
-        # Add aggregate statistics
-        embed.add_field(name="💰 Total Tokens Allocated", value=str(aggregate_results.get('total_tokens_allocated', 0)), inline=True)
-        embed.add_field(name="🗳️ Total Votes Cast", value=str(aggregate_results.get('total_votes_cast', 0)), inline=True)
-        embed.add_field(name="🚫 Total Abstain Votes", value=str(aggregate_results.get('total_abstain_votes', 0)), inline=True)
-        
-        # Add scenario summaries
-        scenario_summary = ""
-        for scenario in aggregate_results.get('scenario_results', []):
-            outcome_emoji = "🏆" if scenario.get('winner') else "❌"
-            scenario_summary += f"**S{scenario.get('scenario_order')}:** {scenario.get('title')[:30]}{'...' if len(scenario.get('title', '')) > 30 else ''}\n"
-            scenario_summary += f"  {outcome_emoji} {scenario.get('winner', 'No winner')} ({scenario.get('tokens_used', 0)} tokens)\n\n"
-        
-        if scenario_summary:
-            embed.add_field(name="📋 Scenario Results", value=scenario_summary[:1024], inline=False)
-        
-        # Add footer
-        embed.set_footer(text=f"Campaign completed at {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
-        
-        # Send to campaign-management channel
-        campaign_mgmt_channel_name = CHANNELS.get("campaign_management", "campaign-management")
-        campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-        
-        if campaign_mgmt_channel:
-            completion_announcement = f"🎉 **CAMPAIGN COMPLETED**\n\n"
-            completion_announcement += f"**{campaign.get('title', 'Untitled')}** (C#{campaign_id}) has finished!\n"
-            completion_announcement += f"All {aggregate_results.get('total_scenarios', 0)} scenarios have been completed.\n\n"
-            completion_announcement += f"📊 **Final Statistics:**\n"
-            completion_announcement += f"• Total Tokens Used: {aggregate_results.get('total_tokens_allocated', 0)}\n"
-            completion_announcement += f"• Total Votes Cast: {aggregate_results.get('total_votes_cast', 0)}\n"
-            completion_announcement += f"• Participation: {aggregate_results.get('total_votes_cast', 0) + aggregate_results.get('total_abstain_votes', 0)} total participants\n"
-            
-            await campaign_mgmt_channel.send(completion_announcement, embed=embed)
-            print(f"✅ Campaign completion announcement sent for C#{campaign_id}")
-        
-        # Also send to voting-room
-        voting_channel = discord.utils.get(guild.text_channels, name="voting-room")
-        if voting_channel:
-            brief_announcement = f"🎉 **Campaign Complete:** {campaign.get('title', 'Untitled')} (C#{campaign_id})\n"
-            brief_announcement += f"All scenarios finished! Check <#{campaign_mgmt_channel.id}> for details." if campaign_mgmt_channel else "All scenarios finished!"
-            
-            await voting_channel.send(brief_announcement)
-            print(f"✅ Brief campaign completion announcement sent to voting-room for C#{campaign_id}")
-        
-        # Notify campaign creator via DM
-        try:
-            creator = guild.get_member(campaign.get('creator_id'))
-            if creator:
-                dm_message = f"🎉 Your campaign **{campaign.get('title', 'Untitled')}** (C#{campaign_id}) has been completed!\n\n"
-                dm_message += f"All {aggregate_results.get('total_scenarios', 0)} scenarios have finished voting."
-                await creator.send(dm_message, embed=embed)
-                print(f"✅ Campaign completion DM sent to creator for C#{campaign_id}")
-        except Exception as e:
-            print(f"ERROR sending campaign completion DM: {e}")
-        
-    except Exception as e:
-        print(f"ERROR announcing campaign completion for C#{campaign_id}: {e}")
-        traceback.print_exc()
-
-
-async def update_campaign_control_panel_final(guild: discord.Guild, campaign_id: int):
-    """Update the campaign control panel to show final completed state"""
-    try:
-        campaign = await db.get_campaign(campaign_id)
-        if not campaign or not campaign.get('control_message_id'):
-            return
-        
-        campaign_mgmt_channel_name = CHANNELS.get("campaign_management", "campaign-management")
-        campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-        
-        if not campaign_mgmt_channel:
-            return
-        
-        try:
-            control_message = await campaign_mgmt_channel.fetch_message(campaign['control_message_id'])
-            if control_message:
-                # Create final completed embed
-                creator = guild.get_member(campaign['creator_id'])
-                embed_title = f"✅ Campaign Completed: '{campaign['title']}' (ID: C#{campaign_id})"
-                embed_desc = f"**Creator:** {creator.mention if creator else f'ID: {campaign['creator_id']}'}\n"
-                embed_desc += f"**Description:** {campaign['description'] or 'Not provided.'}\n"
-                embed_desc += f"**Total Scenarios:** {campaign['num_expected_scenarios']}\n"
-                embed_desc += f"**All Scenarios Completed** ✅"
-                
-                completed_embed = discord.Embed(title=embed_title, description=embed_desc, color=discord.Color.gold())
-                completed_embed.add_field(name="Status", value="✅ Completed", inline=True)
-                completed_embed.add_field(name="Final Action", value="Campaign finished", inline=False)
-                completed_embed.set_footer(text=f"Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
-                
-                # Disable all buttons by passing None view
-                await control_message.edit(embed=completed_embed, view=None)
-                print(f"DEBUG: Updated campaign control panel to completed state for C#{campaign_id}")
-        except discord.NotFound:
-            print(f"DEBUG: Campaign control message not found for final update C#{campaign_id}")
-        except Exception as e:
-            print(f"ERROR updating final campaign control panel for C#{campaign_id}: {e}")
-        
-    except Exception as e:
-        print(f"ERROR in update_campaign_control_panel_final for C#{campaign_id}: {e}")

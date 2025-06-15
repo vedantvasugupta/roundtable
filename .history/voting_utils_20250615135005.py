@@ -1,4 +1,4 @@
-import utils
+THIS SHOULD BE A LINTER ERRORimport utils
 import discord
 import asyncio
 from datetime import datetime, timezone
