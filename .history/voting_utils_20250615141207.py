@@ -1,4 +1,4 @@
-import utils
+THIS SHOULD BE A LINTER ERRORimport utils
 import discord
 import asyncio
 from datetime import datetime, timezone
@@ -737,6 +737,9 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
                 hyperparameters = json.loads(hyperparameters)
             except json.JSONDecodeError:
                 hyperparameters = {}
+        
+        weight_mode = hyperparameters.get('weight_mode', 'equal')
+        embed.add_field(name="Token Weight Mode", value=weight_mode.title(), inline=True)
         
         # Add token statistics
         tokens_in_votes = results.get('total_weighted_votes', 0) or results.get('total_weighted_vote_power', 0) or results.get('total_weighted_voting_power', 0) or results.get('total_weighted_ballot_power', 0)

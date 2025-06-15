@@ -546,6 +546,17 @@ class PluralityProposalModal(BaseProposalModal):
         )
         self.add_item(self.allow_abstain_input)
 
+        # Add token weight mode for campaigns
+        if campaign_id:
+            self.token_weight_mode_input = discord.ui.TextInput(
+                label="Token Weight Mode (equal/proportional)",
+                placeholder="equal = 1 token max, proportional = any amount",
+                default="equal",
+                required=False,
+                max_length=15
+            )
+            self.add_item(self.token_weight_mode_input)
+
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -558,6 +569,19 @@ class PluralityProposalModal(BaseProposalModal):
             else:
                 await interaction.followup.send("Invalid input for 'Allow Abstain'. Please use 'yes' or 'no'.", ephemeral=True)
                 return
+
+            # Handle token weight mode for campaigns
+            if self.campaign_id:
+                token_weight_mode = getattr(self, 'token_weight_mode_input', None)
+                if token_weight_mode:
+                    weight_mode_str = token_weight_mode.value.strip().lower()
+                    if weight_mode_str in ["equal", "proportional", ""]:
+                        hyperparameters["weight_mode"] = weight_mode_str if weight_mode_str else "equal"
+                    else:
+                        await interaction.followup.send("Invalid weight mode. Please use 'equal' or 'proportional'.", ephemeral=True)
+                        return
+                else:
+                    hyperparameters["weight_mode"] = "equal"  # Default for campaigns
 
             await self.common_on_submit(interaction, hyperparameters)
         except Exception as e:
@@ -576,6 +600,17 @@ class BordaProposalModal(BaseProposalModal):
         )
         self.add_item(self.allow_abstain_input)
 
+        # Add token weight mode for campaigns
+        if campaign_id:
+            self.token_weight_mode_input = discord.ui.TextInput(
+                label="Token Weight Mode (equal/proportional)",
+                placeholder="equal = 1 token max, proportional = any amount",
+                default="equal",
+                required=False,
+                max_length=15
+            )
+            self.add_item(self.token_weight_mode_input)
+
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -588,6 +623,19 @@ class BordaProposalModal(BaseProposalModal):
             else:
                 await interaction.followup.send("Invalid input for 'Allow Abstain'. Please use 'yes' or 'no'.", ephemeral=True)
                 return
+
+            # Handle token weight mode for campaigns
+            if self.campaign_id:
+                token_weight_mode = getattr(self, 'token_weight_mode_input', None)
+                if token_weight_mode:
+                    weight_mode_str = token_weight_mode.value.strip().lower()
+                    if weight_mode_str in ["equal", "proportional", ""]:
+                        hyperparameters["weight_mode"] = weight_mode_str if weight_mode_str else "equal"
+                    else:
+                        await interaction.followup.send("Invalid weight mode. Please use 'equal' or 'proportional'.", ephemeral=True)
+                        return
+                else:
+                    hyperparameters["weight_mode"] = "equal"  # Default for campaigns
 
             await self.common_on_submit(interaction, hyperparameters)
         except Exception as e:
@@ -606,6 +654,17 @@ class ApprovalProposalModal(BaseProposalModal):
         )
         self.add_item(self.allow_abstain_input)
 
+        # Add token weight mode for campaigns
+        if campaign_id:
+            self.token_weight_mode_input = discord.ui.TextInput(
+                label="Token Weight Mode (equal/proportional)",
+                placeholder="equal = 1 token max, proportional = any amount",
+                default="equal",
+                required=False,
+                max_length=15
+            )
+            self.add_item(self.token_weight_mode_input)
+
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -618,6 +677,19 @@ class ApprovalProposalModal(BaseProposalModal):
             else:
                 await interaction.followup.send("Invalid input for 'Allow Abstain'. Please use 'yes' or 'no'.", ephemeral=True)
                 return
+
+            # Handle token weight mode for campaigns
+            if self.campaign_id:
+                token_weight_mode = getattr(self, 'token_weight_mode_input', None)
+                if token_weight_mode:
+                    weight_mode_str = token_weight_mode.value.strip().lower()
+                    if weight_mode_str in ["equal", "proportional", ""]:
+                        hyperparameters["weight_mode"] = weight_mode_str if weight_mode_str else "equal"
+                    else:
+                        await interaction.followup.send("Invalid weight mode. Please use 'equal' or 'proportional'.", ephemeral=True)
+                        return
+                else:
+                    hyperparameters["weight_mode"] = "equal"  # Default for campaigns
 
             await self.common_on_submit(interaction, hyperparameters)
         except Exception as e:
@@ -636,6 +708,17 @@ class RunoffProposalModal(BaseProposalModal):
         )
         self.add_item(self.allow_abstain_input)
 
+        # Add token weight mode for campaigns
+        if campaign_id:
+            self.token_weight_mode_input = discord.ui.TextInput(
+                label="Token Weight Mode (equal/proportional)",
+                placeholder="equal = 1 token max, proportional = any amount",
+                default="equal",
+                required=False,
+                max_length=15
+            )
+            self.add_item(self.token_weight_mode_input)
+
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -648,6 +731,19 @@ class RunoffProposalModal(BaseProposalModal):
             else:
                 await interaction.followup.send("Invalid input for 'Allow Abstain'. Please use 'yes' or 'no'.", ephemeral=True)
                 return
+
+            # Handle token weight mode for campaigns
+            if self.campaign_id:
+                token_weight_mode = getattr(self, 'token_weight_mode_input', None)
+                if token_weight_mode:
+                    weight_mode_str = token_weight_mode.value.strip().lower()
+                    if weight_mode_str in ["equal", "proportional", ""]:
+                        hyperparameters["weight_mode"] = weight_mode_str if weight_mode_str else "equal"
+                    else:
+                        await interaction.followup.send("Invalid weight mode. Please use 'equal' or 'proportional'.", ephemeral=True)
+                        return
+                else:
+                    hyperparameters["weight_mode"] = "equal"  # Default for campaigns
 
             await self.common_on_submit(interaction, hyperparameters)
         except Exception as e:

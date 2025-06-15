@@ -347,11 +347,15 @@ class BaseVoteView(discord.ui.View):
                     if token_update_success:
                         new_remaining_tokens = current_db_tokens - tokens_invested_this_scenario
                         
-                        # Enhanced feedback based on tokens invested
+                        # Enhanced feedback based on tokens invested and weight mode
+                        weight_mode = self.proposal_hyperparameters.get('weight_mode', 'equal')
+                        
                         if tokens_invested_this_scenario == 0:
                             message = f"🚫 Vote recorded for P#{self.proposal_id} with no token investment. You have {new_remaining_tokens} tokens remaining for this campaign."
-                        else:
-                            message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens. You have {new_remaining_tokens} tokens remaining for this campaign."
+                        elif weight_mode == "equal":
+                            message = f"✅ Vote recorded for P#{self.proposal_id} with 1 token (equal weight). You have {new_remaining_tokens} tokens remaining for this campaign."
+                        else:  # proportional
+                            message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens (proportional weight). You have {new_remaining_tokens} tokens remaining for this campaign."
                         
                         # Add campaign progress info
                         if self.campaign_details:

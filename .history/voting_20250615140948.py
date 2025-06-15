@@ -110,9 +110,23 @@ class TokenInvestmentModal(discord.ui.Modal, title="Invest Tokens"):
         self.base_vote_view = base_vote_view
         self.remaining_tokens = remaining_tokens
 
-        # Always allow full token range selection (no more equal/proportional distinction)
-        title_text = f"Invest Tokens (Max: {remaining_tokens})"
-        placeholder_text = f"Enter 0-{remaining_tokens}"
+        # Get weight mode from proposal hyperparameters
+        proposal_id = base_vote_view.proposal_id
+        weight_mode = "equal"  # Default
+        
+        # Get weight mode from hyperparameters if available
+        if hasattr(base_vote_view, 'proposal_hyperparameters') and base_vote_view.proposal_hyperparameters:
+            weight_mode = base_vote_view.proposal_hyperparameters.get('weight_mode', 'equal')
+        
+        # Determine max tokens based on weight mode
+        if weight_mode == "equal":
+            max_tokens = min(1, remaining_tokens)
+            title_text = f"Invest Tokens (Equal Weight - Max: 1)"
+            placeholder_text = "Enter 0 or 1"
+        else:  # proportional
+            max_tokens = remaining_tokens
+            title_text = f"Invest Tokens (Proportional - Max: {remaining_tokens})"
+            placeholder_text = f"Enter 0-{remaining_tokens}"
         
         # Update modal title
         self.title = title_text
@@ -122,9 +136,13 @@ class TokenInvestmentModal(discord.ui.Modal, title="Invest Tokens"):
             placeholder=placeholder_text,
             required=True,
             min_length=1,
-            max_length=len(str(remaining_tokens)) if remaining_tokens > 0 else 1
+            max_length=len(str(max_tokens)) if max_tokens > 0 else 1
         )
         self.add_item(self.token_input)
+        
+        # Store max tokens for validation
+        self.max_tokens = max_tokens
+        self.weight_mode = weight_mode
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -135,17 +153,33 @@ class TokenInvestmentModal(discord.ui.Modal, title="Invest Tokens"):
 
             tokens_to_invest = int(tokens_to_invest_str)
 
-            # Simple validation - just check range
-            if not (0 <= tokens_to_invest <= self.remaining_tokens):
-                await interaction.response.send_message(
-                    f"❌ Invalid amount. You must invest between 0 and {self.remaining_tokens} tokens.",
-                    ephemeral=True
-                )
-                return
+            # Enhanced validation based on weight mode
+            if self.weight_mode == "equal":
+                if tokens_to_invest not in [0, 1]:
+                    await interaction.response.send_message(
+                        f"❌ In equal weight mode, you can only invest 0 or 1 token.",
+                        ephemeral=True
+                    )
+                    return
+                if tokens_to_invest > self.remaining_tokens:
+                    await interaction.response.send_message(
+                        f"❌ You don't have enough tokens. You have {self.remaining_tokens} remaining.",
+                        ephemeral=True
+                    )
+                    return
+            else:  # proportional mode
+                if not (0 <= tokens_to_invest <= self.remaining_tokens):
+                    await interaction.response.send_message(
+                        f"❌ Invalid amount. You must invest between 0 and {self.remaining_tokens} tokens.",
+                        ephemeral=True
+                    )
+                    return
 
             # Provide feedback on token investment
             if tokens_to_invest == 0:
                 investment_msg = "🚫 You chose to invest 0 tokens in this scenario."
+            elif self.weight_mode == "equal":
+                investment_msg = f"🗳️ You invested 1 token (equal weight mode). You have {self.remaining_tokens - 1} tokens remaining."
             else:
                 investment_msg = f"🗳️ You invested {tokens_to_invest} tokens. You have {self.remaining_tokens - tokens_to_invest} tokens remaining."
 
@@ -255,26 +289,42 @@ class BaseVoteView(discord.ui.View):
                     await interaction.followup.send("Error: Could not verify your current token balance. Please try again later.", ephemeral=True)
                 return
 
+
             if fresh_user_remaining_tokens == 0: # No tokens left, auto-invest 0
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True, thinking=True)
                 await self.finalize_vote(interaction, tokens_invested_this_scenario=0)
             else:
-                # Always present the token investment modal for campaign votes
-                # This will be the first response to the interaction.
-                try:
-                    token_modal = TokenInvestmentModal(base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
-                    await interaction.response.send_modal(token_modal)
-                except discord.errors.InteractionResponded:
-                    print(f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
-                    await interaction.followup.send("An error occurred while trying to process your selection. Please try again.", ephemeral=True)
-                except Exception as e:
-                    print(f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
-                    traceback.print_exc()
-                    if not interaction.response.is_done():
-                         await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
+                # Check weight mode to determine behavior
+                weight_mode = self.proposal_hyperparameters.get('weight_mode', 'equal')
+                
+                if weight_mode == "equal":
+                    # In equal weight mode, automatically invest 1 token if available
+                    if fresh_user_remaining_tokens >= 1:
+                        if not interaction.response.is_done():
+                            await interaction.response.defer(ephemeral=True, thinking=True)
+                        await self.finalize_vote(interaction, tokens_invested_this_scenario=1)
                     else:
-                        await interaction.followup.send("An unexpected error occurred. Please try again.", ephemeral=True)
+                        # This shouldn't happen since we checked for 0 tokens above, but handle just in case
+                        if not interaction.response.is_done():
+                            await interaction.response.defer(ephemeral=True, thinking=True)
+                        await self.finalize_vote(interaction, tokens_invested_this_scenario=0)
+                else:
+                    # Proportional mode: present the token investment modal
+                    # This will be the first response to the interaction.
+                    try:
+                        token_modal = TokenInvestmentModal(base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
+                        await interaction.response.send_modal(token_modal)
+                    except discord.errors.InteractionResponded:
+                        print(f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
+                        await interaction.followup.send("An error occurred while trying to process your selection. Please try again.", ephemeral=True)
+                    except Exception as e:
+                        print(f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
+                        traceback.print_exc()
+                        if not interaction.response.is_done():
+                             await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
+                        else:
+                            await interaction.followup.send("An unexpected error occurred. Please try again.", ephemeral=True)
 
         else:
             # Not a campaign vote, or other direct finalize cases
@@ -347,11 +397,15 @@ class BaseVoteView(discord.ui.View):
                     if token_update_success:
                         new_remaining_tokens = current_db_tokens - tokens_invested_this_scenario
                         
-                        # Enhanced feedback based on tokens invested
+                        # Enhanced feedback based on tokens invested and weight mode
+                        weight_mode = self.proposal_hyperparameters.get('weight_mode', 'equal')
+                        
                         if tokens_invested_this_scenario == 0:
                             message = f"🚫 Vote recorded for P#{self.proposal_id} with no token investment. You have {new_remaining_tokens} tokens remaining for this campaign."
-                        else:
-                            message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens. You have {new_remaining_tokens} tokens remaining for this campaign."
+                        elif weight_mode == "equal":
+                            message = f"✅ Vote recorded for P#{self.proposal_id} with 1 token (equal weight). You have {new_remaining_tokens} tokens remaining for this campaign."
+                        else:  # proportional
+                            message = f"✅ Vote recorded for P#{self.proposal_id} with {tokens_invested_this_scenario} tokens (proportional weight). You have {new_remaining_tokens} tokens remaining for this campaign."
                         
                         # Add campaign progress info
                         if self.campaign_details:
