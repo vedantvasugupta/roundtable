@@ -1724,22 +1724,13 @@ async def get_proposals_by_campaign_id(campaign_id: int, guild_id: Optional[int]
                 # No need to check for 'id' as it shouldn't exist.
 
                 # Deserialize hyperparameters
-                hyper_raw = proposal.get('hyperparameters')
-                if hyper_raw:
-                    if isinstance(hyper_raw, dict):
-                        proposal['hyperparameters'] = hyper_raw
-                    elif isinstance(hyper_raw, str):
-                        try:
-                            deserialized = json.loads(hyper_raw)
-                            if isinstance(deserialized, str):
-                                try:
-                                    deserialized = json.loads(deserialized)
-                                except json.JSONDecodeError:
-                                    pass
-                            proposal['hyperparameters'] = deserialized if isinstance(deserialized, dict) else {}
-                        except json.JSONDecodeError:
-                            print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hyper_raw}")
-                            proposal['hyperparameters'] = {}
+                hp_json = proposal.get('hyperparameters')
+                if hp_json:
+                    try:
+                        proposal['hyperparameters'] = json.loads(hp_json)
+                    except json.JSONDecodeError:
+                        print(f"Warning: Invalid JSON in hyperparameters for proposal {proposal.get('proposal_id')}. Defaulting to empty dict. JSON: {hp_json}")
+                        proposal['hyperparameters'] = {}
                 else:
                     proposal['hyperparameters'] = {}
 

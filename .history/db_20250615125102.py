@@ -505,25 +505,16 @@ async def get_proposal(proposal_id):
                 # proposal['proposal_id'] = proposal['id']
 
                 # Deserialize hyperparameters
-                hyperparameters_raw = proposal.get('hyperparameters')
-                if hyperparameters_raw:
-                    if isinstance(hyperparameters_raw, dict):
-                        proposal['hyperparameters'] = hyperparameters_raw
-                    elif isinstance(hyperparameters_raw, str):
-                        try:
-                            deserialized = json.loads(hyperparameters_raw)
-                            # Handle possible double-encoding
-                            if isinstance(deserialized, str):
-                                try:
-                                    deserialized = json.loads(deserialized)
-                                except json.JSONDecodeError:
-                                    pass
-                            proposal['hyperparameters'] = deserialized if isinstance(deserialized, dict) else {}
-                        except json.JSONDecodeError:
-                            print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')}. Value: {hyperparameters_raw}")
-                            proposal['hyperparameters'] = {}
-                else:
-                    proposal['hyperparameters'] = {}
+                hyperparameters_json = proposal.get('hyperparameters')
+                if hyperparameters_json and isinstance(hyperparameters_json, str):
+                    try:
+                        proposal['hyperparameters'] = json.loads(hyperparameters_json)
+                    except json.JSONDecodeError:
+                        print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')}. Value: {hyperparameters_json}")
+                        proposal['hyperparameters'] = {} # Default to empty dict on error
+                elif not hyperparameters_json:
+                    proposal['hyperparameters'] = {} # Default to empty dict if None or empty string
+                # If it's already a dict (e.g. if somehow loaded as such), leave it.
 
                 return proposal
             return None
@@ -1724,22 +1715,13 @@ async def get_proposals_by_campaign_id(campaign_id: int, guild_id: Optional[int]
                 # No need to check for 'id' as it shouldn't exist.
 
                 # Deserialize hyperparameters
-                hyper_raw = proposal.get('hyperparameters')
-                if hyper_raw:
-                    if isinstance(hyper_raw, dict):
-                        proposal['hyperparameters'] = hyper_raw
-                    elif isinstance(hyper_raw, str):
-                        try:
-                            deserialized = json.loads(hyper_raw)
-                            if isinstance(deserialized, str):
-                                try:
-                                    deserialized = json.loads(deserialized)
-                                except json.JSONDecodeError:
-                                    pass
-                            proposal['hyperparameters'] = deserialized if isinstance(deserialized, dict) else {}
-                        except json.JSONDecodeError:
-                            print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hyper_raw}")
-                            proposal['hyperparameters'] = {}
+                hp_json = proposal.get('hyperparameters')
+                if hp_json:
+                    try:
+                        proposal['hyperparameters'] = json.loads(hp_json)
+                    except json.JSONDecodeError:
+                        print(f"Warning: Invalid JSON in hyperparameters for proposal {proposal.get('proposal_id')}. Defaulting to empty dict. JSON: {hp_json}")
+                        proposal['hyperparameters'] = {}
                 else:
                     proposal['hyperparameters'] = {}
 

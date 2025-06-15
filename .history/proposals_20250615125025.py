@@ -1,4 +1,4 @@
-import discord
+THIS SHOULD BE A LINTER ERRORimport discord
 from discord.ext import commands
 from discord.app_commands import Choice
 import asyncio
@@ -754,7 +754,10 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
         # Determine initial status
         initial_status = "Pending Approval" if requires_approval else "Voting"
 
-        # Step 1: Create the proposal without the options. Pass hyperparameters as a dictionary; the DB layer will serialize it.
+        # Convert hyperparameters to JSON string for DB
+        hyperparameters_json = json.dumps(hyperparameters) if hyperparameters else "{}"
+
+        # Step 1: Create the proposal without the options
         proposal_id = await db.create_proposal(
             server_id=guild_id,
             proposer_id=interaction.user.id,
@@ -763,7 +766,7 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
             voting_mechanism=mechanism_name,
             deadline=deadline_db_str,
             requires_approval=requires_approval,
-            hyperparameters=hyperparameters,
+            hyperparameters=hyperparameters_json,
             campaign_id=campaign_id,
             scenario_order=scenario_order,
             initial_status=initial_status
