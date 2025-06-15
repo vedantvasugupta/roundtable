@@ -545,24 +545,15 @@ async def get_server_proposals(server_id, status=None):
                 column_names = [desc[0] for desc in cursor.description]
                 proposals_list = [{column_names[i]: row[i] for i in range(len(row))} for row in rows]
                 for proposal in proposals_list:
-                    hp_raw = proposal.get('hyperparameters')
-                    if hp_raw:
-                        if isinstance(hp_raw, dict):
-                            proposal['hyperparameters'] = hp_raw
-                        elif isinstance(hp_raw, str):
-                            try:
-                                deserialized = json.loads(hp_raw)
-                                if isinstance(deserialized, str):
-                                    try:
-                                        deserialized = json.loads(deserialized)
-                                    except json.JSONDecodeError:
-                                        pass
-                                proposal['hyperparameters'] = deserialized if isinstance(deserialized, dict) else {}
-                            except json.JSONDecodeError:
-                                print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hp_raw}")
-                                proposal['hyperparameters'] = {}
-                    else:
-                        proposal['hyperparameters'] = {}
+                    hyperparameters_json = proposal.get('hyperparameters')
+                    if hyperparameters_json and isinstance(hyperparameters_json, str):
+                        try:
+                            proposal['hyperparameters'] = json.loads(hyperparameters_json)
+                        except json.JSONDecodeError:
+                            print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hyperparameters_json}")
+                            proposal['hyperparameters'] = {} # Default to empty dict on error
+                    elif not hyperparameters_json:
+                        proposal['hyperparameters'] = {} # Default to empty dict if None or empty string
                 return proposals_list
             return []
 
@@ -579,24 +570,15 @@ async def get_proposals_by_status(status):
                 column_names = [desc[0] for desc in cursor.description]
                 proposals_list = [{column_names[i]: row[i] for i in range(len(row))} for row in rows]
                 for proposal in proposals_list:
-                    hp_raw = proposal.get('hyperparameters')
-                    if hp_raw:
-                        if isinstance(hp_raw, dict):
-                            proposal['hyperparameters'] = hp_raw
-                        elif isinstance(hp_raw, str):
-                            try:
-                                deserialized = json.loads(hp_raw)
-                                if isinstance(deserialized, str):
-                                    try:
-                                        deserialized = json.loads(deserialized)
-                                    except json.JSONDecodeError:
-                                        pass
-                                proposal['hyperparameters'] = deserialized if isinstance(deserialized, dict) else {}
-                            except json.JSONDecodeError:
-                                print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hp_raw}")
-                                proposal['hyperparameters'] = {}
-                    else:
-                        proposal['hyperparameters'] = {}
+                    hyperparameters_json = proposal.get('hyperparameters')
+                    if hyperparameters_json and isinstance(hyperparameters_json, str):
+                        try:
+                            proposal['hyperparameters'] = json.loads(hyperparameters_json)
+                        except json.JSONDecodeError:
+                            print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hyperparameters_json}")
+                            proposal['hyperparameters'] = {} # Default to empty dict on error
+                    elif not hyperparameters_json:
+                        proposal['hyperparameters'] = {} # Default to empty dict if None or empty string
                 return proposals_list
             return []
 
@@ -1742,13 +1724,13 @@ async def get_proposals_by_campaign_id(campaign_id: int, guild_id: Optional[int]
                 # No need to check for 'id' as it shouldn't exist.
 
                 # Deserialize hyperparameters
-                hp_raw = proposal.get('hyperparameters')
-                if hp_raw:
-                    if isinstance(hp_raw, dict):
-                        proposal['hyperparameters'] = hp_raw
-                    elif isinstance(hp_raw, str):
+                hyper_raw = proposal.get('hyperparameters')
+                if hyper_raw:
+                    if isinstance(hyper_raw, dict):
+                        proposal['hyperparameters'] = hyper_raw
+                    elif isinstance(hyper_raw, str):
                         try:
-                            deserialized = json.loads(hp_raw)
+                            deserialized = json.loads(hyper_raw)
                             if isinstance(deserialized, str):
                                 try:
                                     deserialized = json.loads(deserialized)
@@ -1756,7 +1738,7 @@ async def get_proposals_by_campaign_id(campaign_id: int, guild_id: Optional[int]
                                     pass
                             proposal['hyperparameters'] = deserialized if isinstance(deserialized, dict) else {}
                         except json.JSONDecodeError:
-                            print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hp_raw}")
+                            print(f"WARNING: Failed to deserialize hyperparameters for proposal {proposal.get('proposal_id')} in list. Value: {hyper_raw}")
                             proposal['hyperparameters'] = {}
                 else:
                     proposal['hyperparameters'] = {}
