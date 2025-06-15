@@ -1,4 +1,4 @@
-import discord
+THIS SHOULD BE A LINTER ERRORimport discord
 from discord.ext import commands
 from discord.app_commands import Choice
 import asyncio
@@ -895,7 +895,7 @@ class AdminApprovalView(discord.ui.View):
         self.add_item(self.reject_button)
 
     # Removed @discord.ui.button decorator as buttons are created in __init__
-    async def approve_button_callback(self, interaction: discord.Interaction):
+    async def approve_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Defer interaction first
         await interaction.response.defer(ephemeral=False) # Ephemeral False to allow followup if needed
 
@@ -926,9 +926,10 @@ class AdminApprovalView(discord.ui.View):
 
         if success:
             # Disable buttons on success
-            # Find and disable both buttons
+            button.disabled = True
+            # Find the reject button and disable it too
             for item in self.children:
-                if isinstance(item, discord.ui.Button):
+                if isinstance(item, discord.ui.Button) and item.custom_id == f"admin_reject_proposal_{proposal_id_from_custom_id}":
                     item.disabled = True
             await interaction.edit_original_response(view=self)
             await interaction.followup.send(message_content, ephemeral=True) # Send confirmation to admin
@@ -936,7 +937,7 @@ class AdminApprovalView(discord.ui.View):
             await interaction.followup.send(f"Failed to approve: {message_content}", ephemeral=True)
 
     # Removed @discord.ui.button decorator
-    async def reject_button_callback(self, interaction: discord.Interaction):
+    async def reject_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         custom_id_parts = interaction.data['custom_id'].split('_')
         try:
             proposal_id_from_custom_id = int(custom_id_parts[-1])
