@@ -1,4 +1,4 @@
-import discord
+THIS SHOULD BE A LINTER ERRORimport discord
 from discord.ext import commands
 from discord.app_commands import Choice
 import asyncio
@@ -805,32 +805,12 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
 
         if initial_status == "Pending Approval":
             # Notify user that it's pending approval
-            if campaign_id:
-                await interaction.followup.send(
-                    f"✅ Scenario '{title}' (ID: P#{proposal_id}) for Campaign C#{campaign_id} has been submitted and is pending admin approval.",
-                    ephemeral=True
-                )
-            else:
-                await interaction.followup.send(
-                    f"✅ Proposal '{title}' (ID: P#{proposal_id}) has been submitted and is pending admin approval.",
-                    ephemeral=True
-                )
-            # Send notification to admins in the proposals channel
-            await _send_admin_approval_notification(interaction, proposal_id, title, description)
-
-        elif initial_status == "ApprovedScenario":
-            # Scenario was auto-approved for an approved campaign
             await interaction.followup.send(
-                f"✅ Scenario '{title}' (ID: P#{proposal_id}) for Campaign C#{campaign_id} has been created and approved! It will become active when the campaign reaches this stage.",
+                f"✅ Proposal '{title}' (ID: #{proposal_id}) has been submitted and is pending admin approval.",
                 ephemeral=True
             )
-            
-            # Update campaign scenario count
-            if campaign_id and scenario_order:
-                await db.increment_defined_scenarios(campaign_id)
-                print(f"DEBUG: Incremented defined scenarios count for campaign C#{campaign_id}")
-            
-            # No admin notification needed since it's auto-approved
+            # Send notification to admins in the proposals channel
+            await _send_admin_approval_notification(interaction, proposal_id, title, description)
 
         else: # Status is 'Voting'
             # Notify user that voting has started and distribute DMs
@@ -1239,9 +1219,9 @@ async def _perform_approve_campaign_action(admin_interaction_for_message_edit: d
         if campaign_proposals:
             for scenario_proposal in campaign_proposals:
                 if scenario_proposal['status'] == 'Pending Approval':
-                    await db.update_proposal_status(scenario_proposal['proposal_id'], "ApprovedScenario", approved_by=admin_user.id)
+                    await db.update_proposal_status(scenario_proposal['id'], "ApprovedScenario", set_requires_approval_false=True)
                     updated_scenario_count += 1
-                    print(f"DEBUG: Auto-approved existing scenario P#{scenario_proposal['proposal_id']} for newly approved C#{campaign_id}.")
+                    print(f"DEBUG: Auto-approved existing scenario P#{scenario_proposal['id']} for newly approved C#{campaign_id}.")
         if updated_scenario_count > 0:
             print(f"INFO: Updated {updated_scenario_count} existing pending scenarios to 'ApprovedScenario' for C#{campaign_id}.")
     except Exception as e_update_scenarios:
