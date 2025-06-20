@@ -854,6 +854,59 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         print(
             f"DEBUG: Set results_pending_announcement=1 for proposal {proposal_id}")
 
+        # Mark the announcement as complete in the database
+        # Use integer 0 for False in SQLite
+        await db.update_proposal(proposal_id, {'results_pending_announcement': 0})
+        print(f"DEBUG: Marked results_pending_announcement=0 for proposal #{proposal_id}")
+
+        # NEW: Auto-progression logic for campaign scenarios
+        if proposal.get('campaign_id'):
+            campaign_id = proposal['campaign_id']
+            print(f"DEBUG: Checking for auto-progression in campaign C#{campaign_id} after P#{proposal_id} completed")
+            
+            try:
+                # Get all proposals for this campaign
+                campaign_proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=guild.id)
+                
+                # Find queued scenarios (ApprovedScenario status) that should start next
+                queued_scenarios = [p for p in campaign_proposals if p['status'] == 'ApprovedScenario']
+                
+                if queued_scenarios:
+                    # Start voting for all queued scenarios immediately
+                    queued_scenario_ids = [p['proposal_id'] for p in queued_scenarios]
+                    print(f"DEBUG: Auto-starting {len(queued_scenarios)} queued scenario(s) in C#{campaign_id}: {queued_scenario_ids}")
+                    
+                    # Get bot instance from guild (we need it for initiate_campaign_stage_voting)
+                    # This is a bit tricky since we don't have bot_instance directly here
+                    # We'll need to import it from main or get it another way
+                    try:
+                        import main
+                        bot_instance = main.bot
+                        
+                        success_auto_start, auto_start_msg = await initiate_campaign_stage_voting(
+                            guild=guild,
+                            campaign_id=campaign_id,
+                            scenario_proposal_ids=queued_scenario_ids,
+                            bot_instance=bot_instance
+                        )
+                        
+                        if success_auto_start:
+                            print(f"DEBUG: Successfully auto-started queued scenarios in C#{campaign_id}: {auto_start_msg}")
+                        else:
+                            print(f"DEBUG: Failed to auto-start queued scenarios in C#{campaign_id}: {auto_start_msg}")
+                            
+                    except Exception as e_auto_start:
+                        print(f"ERROR: Failed to auto-start queued scenarios in C#{campaign_id}: {e_auto_start}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"DEBUG: No queued scenarios found in C#{campaign_id} for auto-progression")
+                    
+            except Exception as e_progression:
+                print(f"ERROR: Exception during auto-progression check for C#{campaign_id}: {e_progression}")
+                import traceback
+                traceback.print_exc()
+
         return results
 
     except Exception as e:
