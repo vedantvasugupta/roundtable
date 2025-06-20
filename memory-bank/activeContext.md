@@ -2,116 +2,65 @@
 
 ## Current Task
 
-*   **DONE: Implement Server Guide Channel:** A new read-only channel (`#server-guide`) is now automatically created on server join/bot start. It contains a comprehensive embed detailing server channels, voting protocols (Plurality, Borda, Approval, Runoff, D'Hondt, Copeland), and bot usage.
-*   **Memory Bank Update:** Updating all memory bank files to reflect the current project state, focusing on the resolution of several critical user-reported issues and the implementation of batched campaign voting with token atomicity. (Partially done, updated for Server Guide, previous major changes already documented).
+*   **FIXED: AdminApprovalView Callback Error:** Fixed the `TypeError: AdminApprovalView.approve_button_callback() missing 1 required positional argument: 'button'` error by removing the `button` parameter from callback function signatures since they're manually assigned.
+*   **FIXED: Campaign Control Panel Updates:** Added `_update_campaign_control_panel()` function that gets called after each scenario is created to keep the campaign management interface updated with current state.
 *   **RESOLVED: DM Hyperparameters Error:** Fixed the `'str' object has no attribute 'items'` error in voting DM sending by adding proper type checking and JSON parsing in both `send_voting_dm` and `send_campaign_scenario_dms_to_user` functions.
 *   **RESOLVED: Campaign Auto-Approval Logic:** Implemented auto-approval for campaign scenarios when the campaign is in 'setup' or 'active' status, ensuring proper campaign flow from approval to scenario definition to voting.
 
-## Resolved Issues (Current Session)
+## Latest Fixes (Current Session)
 
-*   **New Feature: Server Guide Channel (`main.py`, `utils.py`):**
-    *   Added `server-guide` to `CHANNELS` dictionary in `main.py`.
-    *   Created `create_and_send_server_guide(guild, bot)` function in `main.py`.
-        *   This function uses `utils.get_or_create_channel` to create/get the `#server-guide` channel with read-only permissions for users and send permissions for the bot.
-        *   It purges previous bot messages from the channel.
-        *   It constructs and sends a detailed embed explaining server channels, voting protocols (Plurality, Borda, Approval, Runoff, D'Hondt, Copeland with explanations, analogies, pros/cons), and basic bot commands.
-    *   Called `create_and_send_server_guide` in `on_ready` (for existing guilds) and `on_guild_join` (for new guilds).
-    *   Ensured `timezone` from `datetime` is imported for the embed footer timestamp.
-*   **Issue 1: Plurality Vote Submission Hanging (`voting.py`):**
-    *   **Fix:** Corrected interaction handling in `PluralityVoteView.option_callback`, `AbstainButton.callback`, `BaseVoteView.submit_vote_callback`, and `BaseVoteView.finalize_vote`. Removed premature responses and ensured proper deferral and follow-up logic. Button style updates are now handled in memory and applied by `finalize_vote`.
-    *   **Impact:** Plurality votes (and likely other simple votes) should now submit correctly without hanging. Token investment modals for campaigns should also appear as expected.
+1. **AdminApprovalView Button Callback Fix:**
+   - **Problem:** `TypeError: AdminApprovalView.approve_button_callback() missing 1 required positional argument: 'button'` was occurring because the callback functions were manually assigned but still had the button parameter in their signatures.
+   - **Solution:** Removed the `button` parameter from both `approve_button_callback` and `reject_button_callback` methods in `AdminApprovalView`.
+   - **Location:** `proposals.py` lines ~926-970
 
-*   **Issue 3b: Proposal Termination Error (`voting_utils.py`):**
-    *   **Fix:** Modified `close_proposal` to map a "Failed" status (determined by lack of a winner) to "Closed" before updating the database. This ensures proposals that don't pass are still marked as "Closed" and not "Failed" in the DB if that was the intended final state.
-    *   **Impact:** Proposals that end without a winner will now be correctly recorded as "Closed" in the database if that's the desired terminal state for failed proposals.
+2. **Campaign Control Panel Update System:**
+   - **Problem:** After defining scenarios in campaigns, the control panel wasn't updating to reflect the new scenario count and button states.
+   - **Solution:** Added `_update_campaign_control_panel()` function that:
+     - Fetches the latest campaign data
+     - Updates the control message embed with current scenario counts
+     - Refreshes button states using `CampaignControlView.update_button_states()`
+     - Gets called automatically after scenario creation in `_create_new_proposal_entry()`
+   - **Location:** `proposals.py` lines ~1845-1919
 
-*   **Issue 4: "P#" Prefix in User-Facing Messages (`voting.py`, `voting_utils.py`, `proposals.py`):**
-    *   **Fix:** Searched and replaced user-facing instances of "P#{proposal_id}" with "#{proposal_id}" or "Proposal #{proposal_id}" for better readability across relevant files.
-    *   **Impact:** User messages and detailed logs should now display proposal IDs more cleanly.
-
-*   **Issue 5: Simultaneous Voting DMs & Token Atomicity for Campaigns:**
-    *   **New Functions (`voting_utils.py`):**
-        *   `initiate_campaign_stage_voting(guild, campaign_id, scenario_proposal_ids, bot_instance)`: Sets multiple scenarios to 'Voting', announces them, and triggers batched DM sending.
-        *   `send_batched_campaign_dms(guild, campaign_id, scenarios_data, bot_instance)`: Fetches eligible members and calls `send_campaign_scenario_dms_to_user` for each.
-    *   **New Function (`voting.py`):**
-        *   `send_campaign_scenario_dms_to_user(member, scenarios_data)`: Sends multiple DMs to a user for a batch of scenarios, ensuring each DM reflects the *initial* token balance for that batch.
-    *   **Core Logic (`voting.py` - `BaseVoteView.finalize_vote`):**
-        *   **Pre-Vote Token Check:** Before processing a campaign vote, `finalize_vote` now re-fetches the user's current token balance from the database (`db.get_user_remaining_tokens`).
-        *   **Validation:** It validates the `tokens_invested_this_scenario` against this fresh balance. If overdrawn, an error message is sent, and the vote is not processed.
-        *   **Atomic Update:** `db.update_user_remaining_tokens` (which should ideally be an atomic SQL operation like `UPDATE ... SET tokens = tokens - ? WHERE tokens >= ?`) is called *after* the vote is recorded.
-        *   **Confirmation:** Confirmation messages now reflect the outcome of the token update and the user's new balance.
-    *   **Integration (`proposals.py` - `CampaignControlView.start_next_callback`):**
-        *   Modified to collect all relevant `ApprovedScenario` proposal IDs for the current stage (either starting order 1 or progressing to the next order).
-        *   Calls `initiate_campaign_stage_voting` with the list of proposal IDs.
-    *   **Helper (`db.py`):** Added `get_proposal_scenario_order(proposal_id)`.
-    *   **Impact:**
-        *   Multiple DMs for a campaign stage can be sent out more concurrently.
-        *   Token investments are now checked against the most current balance right before vote finalization, significantly reducing the risk of overdraft due to simultaneously submitted votes from different DMs. The user gets immediate feedback if their balance changed and the vote cannot proceed with the intended token amount.
+## Resolved Issues (Previous Session)
 
 *   **Issue: DM Hyperparameters Error (`voting.py`):**
     *   **Problem:** The error `'str' object has no attribute 'items'` occurred because `hyperparameters` was sometimes stored/retrieved as a JSON string instead of a dict.
-    *   **Fix:** Added proper type checking and JSON parsing in both `send_voting_dm` and `send_campaign_scenario_dms_to_user` functions to ensure hyperparameters is always a dict before calling `.items()`.
-    *   **Impact:** Voting DMs for both normal proposals and campaign scenarios should now send successfully without the hyperparameters parsing error.
+    *   **Solution:** Added robust type checking in `send_voting_dm` and `send_campaign_scenario_dms_to_user` functions:
+        *   Check if `hyperparameters` is a string and parse with `json.loads()`
+        *   Fall back to empty dict `{}` if parsing fails
+        *   Ensure `.items()` is only called on dict objects
+    *   **Impact:** Normal proposals and campaign scenarios now send DMs properly without crashing.
 
-*   **Issue: Campaign Auto-Approval and Control Flow (`proposals.py`):**
-    *   **Problem:** Campaign scenarios were requiring manual approval even when the campaign was approved, and the control panel wasn't properly showing options to progress the campaign.
-    *   **Fix:** 
-        *   Modified `_create_new_proposal_entry` to implement auto-approval logic for campaign scenarios when the campaign is in 'setup' or 'active' status
-        *   Added logic to automatically set scenario status to 'ApprovedScenario' and disable approval requirement for approved campaigns
-        *   Fixed database field reference bug in campaign approval function (from `scenario_proposal['id']` to `scenario_proposal['proposal_id']`)
-        *   Added automatic scenario count increment when scenarios are created
-    *   **Impact:** 
-        *   Campaign scenarios should now auto-approve when the campaign is approved
-        *   Campaign control panel should properly allow progression from scenario definition to campaign starting
-        *   Normal proposals and campaign proposals are properly isolated and don't interfere with each other
+*   **Issue: Campaign Auto-Approval Logic (`proposals.py`):**
+    *   **Problem:** Campaign scenarios weren't being auto-approved when the campaign was already in 'setup' or 'active' status.
+    *   **Solution:** Modified `_create_new_proposal_entry()` function to:
+        *   Check campaign status when `campaign_id` is provided
+        *   Set `initial_status = "ApprovedScenario"` and `requires_approval = False` for approved campaigns
+        *   Keep normal approval flow for campaigns still pending approval
+    *   **Impact:** Scenarios in approved campaigns are now auto-approved, allowing smooth campaign progression.
 
-## Previously Resolved Issues (Referenced from previous context)
-*   AttributeError in `PluralityVoteView.option_callback` (related to submit button).
-*   Database error "no such column: id" in `db.add_vote`.
-*   Newline formatting in `utils.create_proposal_embed`.
-*   Streamlined Scenario Approval & Campaign Progression.
+## Previous Completed Tasks
 
-## Blocked/Pending Tasks (Due to Tool Limitations - Carry-over)
-*   Streamlined Scenario Approval (auto-approve for active campaigns).
-*   Conditional Campaign Approval Based on Constitutional Variable.
+*   **DONE: Implement Server Guide Channel:** A new read-only channel (`#server-guide`) is now automatically created on server join/bot start. It contains a comprehensive embed detailing server channels, voting protocols (Plurality, Borda, Approval, Runoff, D'Hondt, Copeland), and bot usage.
 
-## Recent Significant Changes (Summary of this session)
-*   **Comprehensive Interaction Handling:** Overhauled response/deferral logic in `voting.py` for button and modal interactions.
-*   **Batched Campaign DM System:** New functions in `voting_utils.py` and `voting.py` to initiate and send DMs for multiple campaign scenarios at once.
-*   **Token Atomicity Measures:** Implemented pre-vote database token checks in `BaseVoteView.finalize_vote` to prevent overdrafts in campaign voting.
-*   **Campaign Progression Update:** `CampaignControlView` now initiates all approved scenarios for a given order/stage simultaneously.
-*   **Database Helper:** Added `get_proposal_scenario_order` to `db.py`.
-*   **Status Mapping:** "Failed" proposals can now be stored as "Closed" in `voting_utils.py`.
-*   **Cosmetic Fixes:** Removed "P#" prefix from user messages.
+## Next Steps
 
-## Next Steps (Immediate & Short-Term)
+1. **Test Complete Campaign Flow:** Verify that:
+   - Campaign creation and approval works
+   - Scenario definition updates the control panel correctly  
+   - Button states reflect the actual campaign status
+   - Users can progress through all scenarios properly
+   - Campaign can be started when scenarios are ready
 
-*   **User Testing of Server Guide:** Verify the `#server-guide` channel is created on new server join and present on existing servers after bot restart. Check content, formatting, and read-only permissions.
-*   **Thorough User Testing of All Resolved Issues:**
-    *   Plurality vote submission (no hang, correct finalization).
-    *   Abstain functionality.
-    *   Campaign scenario voting:
-        *   Simultaneous DM delivery for a stage.
-        *   Correct initial token display in each DM of a batch.
-        *   Token investment modal functionality.
-        *   **Crucially, test token atomicity:** Open multiple DMs for a campaign, try to vote with conflicting token amounts quickly, and verify that balances update correctly and overdrafts are prevented with clear error messages.
-        *   Confirmation messages for votes and token usage.
-    *   Proposal termination: Verify "Failed" proposals correctly appear as "Closed" if that's the flow.
-    *   Check for "P#" prefixes in all relevant user-facing areas.
-*   **Review and Update `progress.md` based on these fixes and new functionalities.**
-*   **Address any new issues arising from testing.**
+2. **Monitor for Additional Issues:** Watch for any remaining edge cases in:
+   - Concurrent scenario definitions
+   - Campaign state transitions
+   - Button interaction edge cases
 
-## Active Decisions & Considerations
-*   **Definition of "Atomic" for Token Updates:** The current implementation relies on a DB check *before* vote processing and a separate DB update *after*. True atomicity would ideally be a single "vote and decrement if sufficient tokens" DB transaction. The `db.update_user_remaining_tokens` function *must* perform an atomic check-and-decrement (e.g., `UPDATE user_tokens SET balance = balance - ? WHERE user_id = ? AND campaign_id = ? AND balance >= ?`). If it doesn't, race conditions are still possible between the `get_user_remaining_tokens` check and the `update_user_remaining_tokens` call, albeit in a smaller window. **This needs verification/emphasis in `db.py`.**
-*   **User Experience for Batched DMs:** While efficient, ensure users aren't overwhelmed by many DMs at once. The current approach of sending all for a "stage" seems reasonable.
-*   **Tool Limitations:** Continue to be mindful of `edit_file` constraints for future complex changes.
-*   **Campaign Auto-Approval:** Scenarios for campaigns in 'setup' or 'active' status now auto-approve to 'ApprovedScenario' status, bypassing normal admin approval flow
-*   **Hyperparameters Handling:** Both voting DM functions now include robust JSON parsing with fallback to empty dict for safety
-*   **Database Field Consistency:** Ensured consistent use of 'proposal_id' field across campaign management functions
+## Recent Learning & Patterns
 
-## Important Patterns & Preferences
-*   **Iterative Development & Testing.**
-*   **Clear User Feedback for actions, especially involving resource changes (tokens).**
-*   **Memory Bank Upkeep.**
-*   **Robust Error Handling:** Especially for JSON parsing and database field access
-*   **Campaign/Proposal Isolation:** Clear separation between normal proposal logic and campaign scenario logic
+*   **Button Callback Pattern:** When manually assigning button callbacks in Discord.py views, don't include the `button` parameter in the callback function signature - it's only needed when using the `@discord.ui.button` decorator.
+*   **Campaign State Management:** The control panel needs active updating after state changes since Discord doesn't automatically refresh UI elements. Manual refresh calls are essential for good UX.
+*   **Error Handling for Hyperparameters:** Database fields storing JSON need robust parsing with fallbacks, as the data can be in different formats depending on how it was stored/retrieved.
