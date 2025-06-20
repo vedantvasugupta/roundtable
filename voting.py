@@ -584,7 +584,7 @@ class ApprovalVoteView(BaseVoteView):
 
     def add_mechanism_items(self):
         self._approved_options = []
-        max_button_items = 25 - 2
+        max_button_items = 25 - 2  # Reserve space for submit button and possibly abstain
         num_options_to_buttonize = min(len(self.options), max_button_items)
 
         for i in range(num_options_to_buttonize):
@@ -602,12 +602,31 @@ class ApprovalVoteView(BaseVoteView):
             )
             button.callback = self.option_callback
             self.add_item(button)
+            
+        # Add Submit Vote button (initially disabled)
+        self.submit_button = discord.ui.Button(
+            label="Submit Vote",
+            style=discord.ButtonStyle.success,
+            custom_id=f"submit_approval_{self.proposal_id}",
+            disabled=True,  # Initially disabled until at least one option is selected
+            row=4  # Place on last row
+        )
+        self.submit_button.callback = self.submit_button_callback
+        self.add_item(self.submit_button)
 
     def has_selection(self):
         return len(self._approved_options) > 0
 
     def get_mechanism_vote_data(self) -> Dict[str, Any]:
         return {"approved": self._approved_options}
+
+    def _update_submit_button(self):
+        """Update the submit button state based on current selections"""
+        self.submit_button.disabled = not self.has_selection()
+        if self.has_selection():
+            self.submit_button.label = f"Submit Vote ({len(self._approved_options)} selected)"
+        else:
+            self.submit_button.label = "Submit Vote"
 
     async def option_callback(self, interaction: discord.Interaction):
         # User check and submission check handled by BaseVoteView
@@ -638,34 +657,33 @@ class ApprovalVoteView(BaseVoteView):
             return
 
         # Defer the interaction response *before* any async operations or sending followups.
-        # This will be the initial response. submit_vote_callback will then use followups or edit this.
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
         else:
             print(f"WARNING: ApprovalVoteView.option_callback interaction already responded. P#{self.proposal_id}")
-            # If already responded, we can't defer again. The user might get an error if subsequent ops fail.
 
         clicked_button = discord.utils.get(
             self.children, custom_id=button_id)
 
         if original_option in self._approved_options:
             self._approved_options.remove(original_option)
-            if clicked_button: # Check if button exists
+            if clicked_button:
                 clicked_button.style = discord.ButtonStyle.secondary
         else:
             self._approved_options.append(original_option)
-            if clicked_button: # Check if button exists
+            if clicked_button:
                 clicked_button.style = discord.ButtonStyle.primary
 
         self.selected_mechanism_vote_data = self.get_mechanism_vote_data()
+        
+        # Update submit button state
+        self._update_submit_button()
 
         # Edit the original message to reflect button style changes immediately.
-        # This interaction was already deferred (or attempted to be).
         try:
             await interaction.edit_original_response(view=self)
         except discord.HTTPException as e:
             print(f"Error editing message in ApprovalVoteView.option_callback: {e}")
-            # Continue to submit_vote_callback even if edit fails, vote logic is more critical.
 
         # Send ephemeral status update about current selections
         if self._approved_options:
@@ -676,18 +694,28 @@ class ApprovalVoteView(BaseVoteView):
             if len(sorted_approved) > 10:
                 status_text += f"\n...and {len(sorted_approved) - 10} more."
             status += status_text
+            status += f"\n\n*Click 'Submit Vote' when you're ready to finalize your choices.*"
         else:
             status = "*No options approved yet. Select one or more options you support.*"
 
         if len(status) > 2000:
             status = status[:1997] + "..."
 
-        # Send status as a followup, as we've already edited the original (or attempted to)
+        # Send status as a followup
         try:
             await interaction.followup.send(status, ephemeral=True)
         except discord.HTTPException as e:
             print(f"Error sending followup status in ApprovalVoteView.option_callback: {e}")
 
+        # NOTE: Do NOT call submit_vote_callback here anymore!
+        # User must click the Submit Vote button when ready
+
+    async def submit_button_callback(self, interaction: discord.Interaction):
+        """Handle the Submit Vote button click"""
+        if not self.has_selection():
+            await interaction.response.send_message("Please select at least one option before submitting.", ephemeral=True)
+            return
+            
         # Proceed to the general submit callback
         await self.submit_vote_callback(interaction)
 
