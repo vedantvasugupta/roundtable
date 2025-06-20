@@ -4,6 +4,8 @@
 
 *   **DONE: Implement Server Guide Channel:** A new read-only channel (`#server-guide`) is now automatically created on server join/bot start. It contains a comprehensive embed detailing server channels, voting protocols (Plurality, Borda, Approval, Runoff, D'Hondt, Copeland), and bot usage.
 *   **Memory Bank Update:** Updating all memory bank files to reflect the current project state, focusing on the resolution of several critical user-reported issues and the implementation of batched campaign voting with token atomicity. (Partially done, updated for Server Guide, previous major changes already documented).
+*   **RESOLVED: DM Hyperparameters Error:** Fixed the `'str' object has no attribute 'items'` error in voting DM sending by adding proper type checking and JSON parsing in both `send_voting_dm` and `send_campaign_scenario_dms_to_user` functions.
+*   **RESOLVED: Campaign Auto-Approval Logic:** Implemented auto-approval for campaign scenarios when the campaign is in 'setup' or 'active' status, ensuring proper campaign flow from approval to scenario definition to voting.
 
 ## Resolved Issues (Current Session)
 
@@ -46,6 +48,23 @@
         *   Multiple DMs for a campaign stage can be sent out more concurrently.
         *   Token investments are now checked against the most current balance right before vote finalization, significantly reducing the risk of overdraft due to simultaneously submitted votes from different DMs. The user gets immediate feedback if their balance changed and the vote cannot proceed with the intended token amount.
 
+*   **Issue: DM Hyperparameters Error (`voting.py`):**
+    *   **Problem:** The error `'str' object has no attribute 'items'` occurred because `hyperparameters` was sometimes stored/retrieved as a JSON string instead of a dict.
+    *   **Fix:** Added proper type checking and JSON parsing in both `send_voting_dm` and `send_campaign_scenario_dms_to_user` functions to ensure hyperparameters is always a dict before calling `.items()`.
+    *   **Impact:** Voting DMs for both normal proposals and campaign scenarios should now send successfully without the hyperparameters parsing error.
+
+*   **Issue: Campaign Auto-Approval and Control Flow (`proposals.py`):**
+    *   **Problem:** Campaign scenarios were requiring manual approval even when the campaign was approved, and the control panel wasn't properly showing options to progress the campaign.
+    *   **Fix:** 
+        *   Modified `_create_new_proposal_entry` to implement auto-approval logic for campaign scenarios when the campaign is in 'setup' or 'active' status
+        *   Added logic to automatically set scenario status to 'ApprovedScenario' and disable approval requirement for approved campaigns
+        *   Fixed database field reference bug in campaign approval function (from `scenario_proposal['id']` to `scenario_proposal['proposal_id']`)
+        *   Added automatic scenario count increment when scenarios are created
+    *   **Impact:** 
+        *   Campaign scenarios should now auto-approve when the campaign is approved
+        *   Campaign control panel should properly allow progression from scenario definition to campaign starting
+        *   Normal proposals and campaign proposals are properly isolated and don't interfere with each other
+
 ## Previously Resolved Issues (Referenced from previous context)
 *   AttributeError in `PluralityVoteView.option_callback` (related to submit button).
 *   Database error "no such column: id" in `db.add_vote`.
@@ -86,8 +105,13 @@
 *   **Definition of "Atomic" for Token Updates:** The current implementation relies on a DB check *before* vote processing and a separate DB update *after*. True atomicity would ideally be a single "vote and decrement if sufficient tokens" DB transaction. The `db.update_user_remaining_tokens` function *must* perform an atomic check-and-decrement (e.g., `UPDATE user_tokens SET balance = balance - ? WHERE user_id = ? AND campaign_id = ? AND balance >= ?`). If it doesn't, race conditions are still possible between the `get_user_remaining_tokens` check and the `update_user_remaining_tokens` call, albeit in a smaller window. **This needs verification/emphasis in `db.py`.**
 *   **User Experience for Batched DMs:** While efficient, ensure users aren't overwhelmed by many DMs at once. The current approach of sending all for a "stage" seems reasonable.
 *   **Tool Limitations:** Continue to be mindful of `edit_file` constraints for future complex changes.
+*   **Campaign Auto-Approval:** Scenarios for campaigns in 'setup' or 'active' status now auto-approve to 'ApprovedScenario' status, bypassing normal admin approval flow
+*   **Hyperparameters Handling:** Both voting DM functions now include robust JSON parsing with fallback to empty dict for safety
+*   **Database Field Consistency:** Ensured consistent use of 'proposal_id' field across campaign management functions
 
 ## Important Patterns & Preferences
 *   **Iterative Development & Testing.**
 *   **Clear User Feedback for actions, especially involving resource changes (tokens).**
 *   **Memory Bank Upkeep.**
+*   **Robust Error Handling:** Especially for JSON parsing and database field access
+*   **Campaign/Proposal Isolation:** Clear separation between normal proposal logic and campaign scenario logic

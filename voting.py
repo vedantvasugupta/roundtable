@@ -709,6 +709,17 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
         # Determine voting mechanism and instantiate the correct view
         mechanism = proposal.get('voting_mechanism', 'plurality').lower()
         hyperparameters = proposal.get('hyperparameters', {})
+        
+        # FIX: Ensure hyperparameters is a dict, not a string
+        if isinstance(hyperparameters, str):
+            try:
+                hyperparameters = json.loads(hyperparameters) if hyperparameters.strip() else {}
+            except json.JSONDecodeError:
+                print(f"WARNING: Failed to parse hyperparameters JSON for P#{proposal_id}: {hyperparameters}")
+                hyperparameters = {}
+        elif not isinstance(hyperparameters, dict):
+            hyperparameters = {}
+            
         allow_abstain = hyperparameters.get('allow_abstain', True) if isinstance(hyperparameters, dict) else True
 
         # Campaign-specific information
@@ -848,6 +859,17 @@ async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_d
 
             mechanism = proposal.get('voting_mechanism', 'plurality').lower()
             hyperparameters = proposal.get('hyperparameters', {})
+            
+            # FIX: Ensure hyperparameters is a dict, not a string
+            if isinstance(hyperparameters, str):
+                try:
+                    hyperparameters = json.loads(hyperparameters) if hyperparameters.strip() else {}
+                except json.JSONDecodeError:
+                    print(f"WARNING: Failed to parse hyperparameters JSON for P#{proposal_id}: {hyperparameters}")
+                    hyperparameters = {}
+            elif not isinstance(hyperparameters, dict):
+                hyperparameters = {}
+                
             allow_abstain = hyperparameters.get('allow_abstain', True) if isinstance(hyperparameters, dict) else True
 
             embed_content = f"## 🗳️ Vote Now (Campaign Scenario): {proposal.get('title', 'N/A')}\n"

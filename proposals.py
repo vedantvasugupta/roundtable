@@ -751,8 +751,21 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                 await interaction.followup.send(f"You do not have the required role ('{eligible_proposers_role_name}') to create proposals.", ephemeral=True)
                 return None
 
-        # Determine initial status
-        initial_status = "Pending Approval" if requires_approval else "Voting"
+        # Determine initial status - AUTO-APPROVAL LOGIC FOR CAMPAIGNS
+        if campaign_id:
+            # For campaign scenarios, check if the campaign is approved
+            campaign_data = await db.get_campaign(campaign_id)
+            if campaign_data and campaign_data['status'] in ['setup', 'active']:
+                # Campaign is approved, auto-approve the scenario
+                initial_status = "ApprovedScenario"
+                requires_approval = False
+                print(f"DEBUG: Auto-approving scenario for approved campaign C#{campaign_id}")
+            else:
+                # Campaign not approved or not found, use normal approval flow
+                initial_status = "Pending Approval" if requires_approval else "Voting"
+        else:
+            # Standalone proposal, use normal logic
+            initial_status = "Pending Approval" if requires_approval else "Voting"
 
         # Convert hyperparameters to JSON string for DB
         hyperparameters_json = json.dumps(hyperparameters) if hyperparameters else "{}"
@@ -788,6 +801,10 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                 await interaction.followup.send("Failed to save proposal options. Aborting.", ephemeral=True)
                 return None
 
+        # Update campaign scenario count if this is a campaign scenario
+        if campaign_id:
+            await db.increment_defined_scenarios(campaign_id)
+
         # --- LOGGING ---
         log_channel_name = "audit-log" # Or from config
         log_channel = await utils.get_or_create_channel(interaction.guild, log_channel_name, interaction.client.user.id)
@@ -802,6 +819,14 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
             )
             # Send notification to admins in the proposals channel
             await _send_admin_approval_notification(interaction, proposal_id, title, description)
+
+        elif initial_status == "ApprovedScenario":
+            # Campaign scenario that was auto-approved
+            await interaction.followup.send(
+                f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created and auto-approved for the campaign! It will be active when the campaign reaches this stage.",
+                ephemeral=True
+            )
+            print(f"DEBUG: Created proposal P#{proposal_id} with campaign_id={campaign_id}, scenario_order={scenario_order}, status='{initial_status}'")
 
         else: # Status is 'Voting'
             # Notify user that voting has started and distribute DMs
@@ -1211,9 +1236,9 @@ async def _perform_approve_campaign_action(admin_interaction_for_message_edit: d
         if campaign_proposals:
             for scenario_proposal in campaign_proposals:
                 if scenario_proposal['status'] == 'Pending Approval':
-                    await db.update_proposal_status(scenario_proposal['id'], "ApprovedScenario", set_requires_approval_false=True)
+                    await db.update_proposal_status(scenario_proposal['proposal_id'], "ApprovedScenario")
                     updated_scenario_count += 1
-                    print(f"DEBUG: Auto-approved existing scenario P#{scenario_proposal['id']} for newly approved C#{campaign_id}.")
+                    print(f"DEBUG: Auto-approved existing scenario P#{scenario_proposal['proposal_id']} for newly approved C#{campaign_id}.")
         if updated_scenario_count > 0:
             print(f"INFO: Updated {updated_scenario_count} existing pending scenarios to 'ApprovedScenario' for C#{campaign_id}.")
     except Exception as e_update_scenarios:
