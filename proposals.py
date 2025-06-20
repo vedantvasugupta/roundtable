@@ -822,10 +822,25 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
 
         elif initial_status == "ApprovedScenario":
             # Campaign scenario that was auto-approved
-            await interaction.followup.send(
-                f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created and auto-approved for the campaign! It will be active when the campaign reaches this stage.",
-                ephemeral=True
-            )
+            base_message = f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created and auto-approved for the campaign!"
+            
+            # Check if campaign is active for more specific messaging
+            campaign_data = await db.get_campaign(campaign_id) if campaign_id else None
+            if campaign_data and campaign_data['status'] == 'active':
+                # Campaign is active, check if we can start immediately
+                campaign_proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=interaction.guild_id)
+                active_voting_scenarios = [p for p in campaign_proposals if p['status'] == 'Voting']
+                
+                if not active_voting_scenarios:
+                    user_message = f"{base_message} Since the campaign is active, voting will start immediately!"
+                else:
+                    active_scenario_info = ", ".join([f"S#{s.get('scenario_order')}" for s in active_voting_scenarios])
+                    user_message = f"{base_message} It will start voting automatically when the currently active scenario(s) ({active_scenario_info}) finish."
+            else:
+                # Campaign not active yet
+                user_message = f"{base_message} It will be active when the campaign is started."
+            
+            await interaction.followup.send(user_message, ephemeral=True)
             print(f"DEBUG: Created proposal P#{proposal_id} with campaign_id={campaign_id}, scenario_order={scenario_order}, status='{initial_status}'")
             
             # Update the campaign control panel after scenario creation
@@ -833,14 +848,10 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                 await _update_campaign_control_panel(campaign_id, interaction.client)
                 
                 # NEW: If campaign is already active, immediately start voting for this scenario
-                campaign_data = await db.get_campaign(campaign_id)
                 if campaign_data and campaign_data['status'] == 'active':
                     print(f"DEBUG: Campaign C#{campaign_id} is active, immediately starting voting for new scenario P#{proposal_id}")
                     
                     # Check if there are any scenarios currently voting to avoid conflicts
-                    campaign_proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=interaction.guild_id)
-                    active_voting_scenarios = [p for p in campaign_proposals if p['status'] == 'Voting']
-                    
                     if not active_voting_scenarios:
                         # No scenarios currently voting, safe to start this one
                         success_init_vote, init_vote_msg = await voting_utils.initiate_campaign_stage_voting(
@@ -855,7 +866,7 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                             # Update user notification
                             try:
                                 await interaction.edit_original_response(
-                                    content=f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created, auto-approved, and voting has started immediately since the campaign is active! DMs have been sent to voters."
+                                    content=f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created, auto-approved, and voting has started immediately! DMs have been sent to voters."
                                 )
                             except discord.HTTPException:
                                 # If editing fails, send a followup
