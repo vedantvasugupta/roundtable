@@ -2,6 +2,7 @@
 
 ## Current Task
 
+*   **FIXED: Active Campaign Scenario DM Sending:** When defining new scenarios in already active campaigns, DMs are now automatically sent immediately instead of requiring manual "Start Next" button clicks.
 *   **FIXED: Approval Voting Submit Button:** Added a "Submit Vote" button to approval voting that allows users to select multiple options and then submit when ready, fixing both normal and campaign approval voting flows.
 *   **FIXED: AdminApprovalView Callback Error:** Fixed the `TypeError: AdminApprovalView.approve_button_callback() missing 1 required positional argument: 'button'` error by removing the `button` parameter from callback function signatures since they're manually assigned.
 *   **FIXED: Campaign Control Panel Updates:** Added `_update_campaign_control_panel()` function that gets called after each scenario is created to keep the campaign management interface updated with current state.
@@ -10,51 +11,67 @@
 
 ## Latest Fixes (Current Session)
 
-1. **Approval Voting Submit Button Fix:**
+1. **Active Campaign Scenario Auto-Start Fix:**
+   - **Problem:** When a campaign was already active and you defined a new scenario (e.g., scenario 3 after starting with scenarios 1 and 2), the scenario was created and auto-approved but no DMs were sent. Users had to manually click "Start Next" in the campaign control panel.
+   - **Root Cause:** The scenario creation logic only created scenarios with "ApprovedScenario" status but didn't check if the campaign was already active to immediately start voting.
+   - **Solution:**
+     - Added logic in `_create_new_proposal_entry()` to detect when a campaign is already in "active" status
+     - When a new scenario is defined for an active campaign, automatically calls `voting_utils.initiate_campaign_stage_voting()` to start voting immediately
+     - Includes safety check to ensure no other scenarios are currently voting before starting the new one
+     - Updates user notification to indicate that voting has started immediately and DMs have been sent
+     - Provides fallback notification if the interaction edit fails
+   - **Location:** `proposals.py` lines ~826-860
+
+2. **Approval Voting Submit Button Fix:**
    - **Problem:** Approval voting was immediately submitting after each option click, not allowing users to select multiple options and submit when ready. This affected both normal proposals and campaign scenarios.
-   - **Root Cause:** The `ApprovalVoteView.option_callback()` was calling `submit_vote_callback()` after each option selection, causing immediate submission instead of allowing multiple selections.
-   - **Solution:** 
-     - Added a "Submit Vote" button that is initially disabled
-     - Modified `option_callback()` to only toggle option selection and update the submit button state
-     - Created `submit_button_callback()` that handles the actual submission
-     - Submit button shows the count of selected options and is enabled/disabled based on selections
-     - Updated user feedback to guide users to click "Submit Vote" when ready
+   - **Solution:** Added a "Submit Vote" button that becomes enabled once at least one option is selected, and modified the flow so option clicking only toggles selection without auto-submitting.
    - **Location:** `voting.py` lines ~590-720
 
-2. **AdminApprovalView Button Callback Fix:**
+3. **AdminApprovalView Button Callback Fix:**
    - **Problem:** `TypeError: AdminApprovalView.approve_button_callback() missing 1 required positional argument: 'button'` was occurring because the callback functions were manually assigned but still had the button parameter in their signatures.
    - **Solution:** Removed the `button` parameter from both `approve_button_callback` and `reject_button_callback` methods in `AdminApprovalView`.
-   - **Location:** `proposals.py` lines ~926-970
+   - **Location:** `proposals.py` lines ~967-1007
 
-3. **Campaign Control Panel Update System:**
+4. **Campaign Control Panel Update System:**
    - **Problem:** After defining scenarios in campaigns, the control panel wasn't updating to reflect the new scenario count and button states.
-   - **Solution:** Added `_update_campaign_control_panel()` function that:
-     - Fetches the latest campaign data
-     - Updates the control message embed with current scenario counts
-     - Refreshes button states using `CampaignControlView.update_button_states()`
-     - Gets called automatically after scenario creation in `_create_new_proposal_entry()`
-   - **Location:** `proposals.py` lines ~1845-1919
+   - **Solution:** Added `_update_campaign_control_panel()` function that automatically updates the control panel after scenario creation.
+   - **Location:** `proposals.py` lines ~1882-1956
 
 ## Impact of Latest Fixes
 
-*   **Normal Approval Voting:** Users can now select multiple options and have a clear submit button to finalize their vote
-*   **Campaign Approval Voting:** Users can select multiple options, and the token investment modal will appear correctly when they click "Submit Vote"
-*   **Admin Proposal Approval:** Normal proposals can now be approved without callback errors
+*   **Seamless Campaign Flow:** Users can now define scenarios at any time during an active campaign and voting will start immediately with DMs sent automatically
+*   **Normal Approval Voting:** Users can select multiple options and have a clear submit button to finalize their vote
+*   **Campaign Approval Voting:** Users can select multiple options, and the token investment modal appears correctly when they click "Submit Vote"
+*   **Admin Proposal Approval:** Normal proposals can be approved without callback errors
 *   **Campaign Management:** Control panels update immediately after scenario creation, showing accurate button states and scenario counts
+
+## User Experience Flow
+
+**Active Campaign Scenario Definition:**
+1. User defines scenarios 1 and 2, starts campaign → DMs sent for both scenarios
+2. User later defines scenario 3 while campaign is active 
+3. System automatically detects campaign is active
+4. Immediately starts voting for scenario 3 and sends DMs
+5. User gets notification that voting started immediately
+6. No manual "Start Next" button clicking required
+
+**Safety Features:**
+- Checks that no other scenarios are currently voting before auto-starting
+- Provides clear debug logging for troubleshooting
+- Graceful fallback notifications if interaction editing fails
 
 ## Next Steps
 
-1. **Test Complete Flows:** Verify that:
-   - Normal approval voting works with submit button
-   - Campaign approval voting shows token investment modal correctly
-   - Admin approval of normal proposals works without errors
-   - Campaign scenario progression flows properly
+1. **Test Complete Active Campaign Flow:** Verify that:
+   - Defining new scenarios in active campaigns immediately sends DMs
+   - No conflicts occur when multiple scenarios are being managed
+   - Control panel updates correctly reflect the new scenario states
 
-2. **Monitor User Experience:** Ensure the new approval voting UX is intuitive and the submit button guidance is clear
+2. **Monitor User Experience:** Ensure the automatic DM sending is smooth and doesn't cause confusion
 
 ## Recent Learning & Patterns
 
+*   **Active Campaign State Management:** When campaigns are already active, new scenarios should immediately transition to voting status rather than waiting for manual intervention.
 *   **Approval Voting UX Pattern:** For multi-selection voting mechanisms, provide clear visual feedback about current selections and require explicit submission rather than auto-submitting after each selection.
-*   **Button Callback Pattern:** When manually assigning button callbacks in Discord.py views, don't include the `button` parameter in the callback function signature - it's only needed when using the `@discord.ui.button` decorator.
-*   **Campaign State Management:** The control panel needs active updating after state changes since Discord doesn't automatically refresh UI elements. Manual refresh calls are essential for good UX.
-*   **Error Handling for Hyperparameters:** Database fields storing JSON need robust parsing with fallbacks, as the data can be in different formats depending on how it was stored/retrieved.
+*   **Campaign Flow Automation:** Users expect seamless experiences where defining new content in active campaigns immediately makes it available for voting.
+*   **Error Handling for Interaction Edits:** Always provide fallback notification methods when primary interaction editing fails.

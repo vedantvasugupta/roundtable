@@ -831,6 +831,43 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
             # Update the campaign control panel after scenario creation
             if campaign_id:
                 await _update_campaign_control_panel(campaign_id, interaction.client)
+                
+                # NEW: If campaign is already active, immediately start voting for this scenario
+                campaign_data = await db.get_campaign(campaign_id)
+                if campaign_data and campaign_data['status'] == 'active':
+                    print(f"DEBUG: Campaign C#{campaign_id} is active, immediately starting voting for new scenario P#{proposal_id}")
+                    
+                    # Check if there are any scenarios currently voting to avoid conflicts
+                    campaign_proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=interaction.guild_id)
+                    active_voting_scenarios = [p for p in campaign_proposals if p['status'] == 'Voting']
+                    
+                    if not active_voting_scenarios:
+                        # No scenarios currently voting, safe to start this one
+                        success_init_vote, init_vote_msg = await voting_utils.initiate_campaign_stage_voting(
+                            guild=interaction.guild,
+                            campaign_id=campaign_id,
+                            scenario_proposal_ids=[proposal_id],
+                            bot_instance=interaction.client
+                        )
+                        
+                        if success_init_vote:
+                            print(f"DEBUG: Successfully initiated voting for new scenario P#{proposal_id} in active campaign C#{campaign_id}")
+                            # Update user notification
+                            try:
+                                await interaction.edit_original_response(
+                                    content=f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created, auto-approved, and voting has started immediately since the campaign is active! DMs have been sent to voters."
+                                )
+                            except discord.HTTPException:
+                                # If editing fails, send a followup
+                                await interaction.followup.send(
+                                    f"🎉 Update: Voting for scenario '{title}' (ID: #{proposal_id}) has started immediately! DMs have been sent to voters.",
+                                    ephemeral=True
+                                )
+                        else:
+                            print(f"DEBUG: Failed to initiate voting for new scenario P#{proposal_id}: {init_vote_msg}")
+                    else:
+                        active_scenario_info = ", ".join([f"S#{s.get('scenario_order')} (P#{s.get('proposal_id')})" for s in active_voting_scenarios])
+                        print(f"DEBUG: Cannot start voting for new scenario P#{proposal_id} because other scenarios are active: {active_scenario_info}")
 
         else: # Status is 'Voting'
             # Notify user that voting has started and distribute DMs
