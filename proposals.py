@@ -751,8 +751,21 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                 await interaction.followup.send(f"You do not have the required role ('{eligible_proposers_role_name}') to create proposals.", ephemeral=True)
                 return None
 
-        # Determine initial status
-        initial_status = "Pending Approval" if requires_approval else "Voting"
+        # Determine initial status - AUTO-APPROVAL LOGIC FOR CAMPAIGNS
+        if campaign_id:
+            # For campaign scenarios, check if the campaign is approved
+            campaign_data = await db.get_campaign(campaign_id)
+            if campaign_data and campaign_data['status'] in ['setup', 'active']:
+                # Campaign is approved, auto-approve the scenario
+                initial_status = "ApprovedScenario"
+                requires_approval = False
+                print(f"DEBUG: Auto-approving scenario for approved campaign C#{campaign_id}")
+            else:
+                # Campaign not approved or not found, use normal approval flow
+                initial_status = "Pending Approval" if requires_approval else "Voting"
+        else:
+            # Standalone proposal, use normal logic
+            initial_status = "Pending Approval" if requires_approval else "Voting"
 
         # Convert hyperparameters to JSON string for DB
         hyperparameters_json = json.dumps(hyperparameters) if hyperparameters else "{}"
@@ -788,6 +801,10 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
                 await interaction.followup.send("Failed to save proposal options. Aborting.", ephemeral=True)
                 return None
 
+        # Update campaign scenario count if this is a campaign scenario
+        if campaign_id:
+            await db.increment_defined_scenarios(campaign_id)
+
         # --- LOGGING ---
         log_channel_name = "audit-log" # Or from config
         log_channel = await utils.get_or_create_channel(interaction.guild, log_channel_name, interaction.client.user.id)
@@ -802,6 +819,71 @@ async def _create_new_proposal_entry(interaction: discord.Interaction, title: st
             )
             # Send notification to admins in the proposals channel
             await _send_admin_approval_notification(interaction, proposal_id, title, description)
+
+        elif initial_status == "ApprovedScenario":
+            # Campaign scenario that was auto-approved
+            base_message = f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created and auto-approved for the campaign!"
+            
+            # Check if campaign is active for more specific messaging
+            campaign_data = await db.get_campaign(campaign_id) if campaign_id else None
+            if campaign_data and campaign_data['status'] == 'active':
+                # Campaign is active, check if we can start immediately
+                campaign_proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=interaction.guild_id)
+                active_voting_scenarios = [p for p in campaign_proposals if p['status'] == 'Voting']
+                
+                if not active_voting_scenarios:
+                    user_message = f"{base_message} Since the campaign is active, voting will start immediately!"
+                else:
+                    active_scenario_info = ", ".join([f"S#{s.get('scenario_order')}" for s in active_voting_scenarios])
+                    user_message = f"{base_message} It will start voting automatically when the currently active scenario(s) ({active_scenario_info}) finish."
+            else:
+                # Campaign not active yet
+                user_message = f"{base_message} It will be active when the campaign is started."
+            
+            await interaction.followup.send(user_message, ephemeral=True)
+            print(f"DEBUG: Created proposal P#{proposal_id} with campaign_id={campaign_id}, scenario_order={scenario_order}, status='{initial_status}'")
+            
+            # Update the campaign control panel after scenario creation
+            if campaign_id:
+                await _update_campaign_control_panel(campaign_id, interaction.client)
+                
+                # NEW: If campaign is already active, immediately start voting for this scenario
+                if campaign_data and campaign_data['status'] == 'active':
+                    print(f"DEBUG: Campaign C#{campaign_id} is active, immediately starting voting for new scenario P#{proposal_id}")
+                    
+                    # Start voting immediately - remove the restriction about other scenarios voting
+                    # Multiple scenarios can vote simultaneously as per original design
+                    success_init_vote, init_vote_msg = await voting_utils.initiate_campaign_stage_voting(
+                        guild=interaction.guild,
+                        campaign_id=campaign_id,
+                        scenario_proposal_ids=[proposal_id],
+                        bot_instance=interaction.client
+                    )
+                    
+                    if success_init_vote:
+                        print(f"DEBUG: Successfully initiated voting for new scenario P#{proposal_id} in active campaign C#{campaign_id}")
+                        # Update user notification
+                        try:
+                            await interaction.edit_original_response(
+                                content=f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created, auto-approved, and voting has started immediately! DMs have been sent to voters."
+                            )
+                        except discord.HTTPException:
+                            # If editing fails, send a followup
+                            await interaction.followup.send(
+                                f"🎉 Update: Voting for scenario '{title}' (ID: #{proposal_id}) has started immediately! DMs have been sent to voters.",
+                                ephemeral=True
+                            )
+                    else:
+                        print(f"DEBUG: Failed to initiate voting for new scenario P#{proposal_id}: {init_vote_msg}")
+                        try:
+                            await interaction.edit_original_response(
+                                content=f"✅ Scenario '{title}' (ID: #{proposal_id}) has been created and auto-approved. {init_vote_msg}"
+                            )
+                        except discord.HTTPException:
+                            await interaction.followup.send(
+                                f"⚠️ Scenario '{title}' (ID: #{proposal_id}) created but issue starting voting: {init_vote_msg}",
+                                ephemeral=True
+                            )
 
         else: # Status is 'Voting'
             # Notify user that voting has started and distribute DMs
@@ -898,7 +980,7 @@ class AdminApprovalView(discord.ui.View):
         self.add_item(self.reject_button)
 
     # Removed @discord.ui.button decorator as buttons are created in __init__
-    async def approve_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def approve_button_callback(self, interaction: discord.Interaction):
         # Defer interaction first
         await interaction.response.defer(ephemeral=False) # Ephemeral False to allow followup if needed
 
@@ -928,11 +1010,9 @@ class AdminApprovalView(discord.ui.View):
         )
 
         if success:
-            # Disable buttons on success
-            button.disabled = True
-            # Find the reject button and disable it too
+            # Find and disable buttons
             for item in self.children:
-                if isinstance(item, discord.ui.Button) and item.custom_id == f"admin_reject_proposal_{proposal_id_from_custom_id}":
+                if isinstance(item, discord.ui.Button):
                     item.disabled = True
             await interaction.edit_original_response(view=self)
             await interaction.followup.send(message_content, ephemeral=True) # Send confirmation to admin
@@ -940,7 +1020,7 @@ class AdminApprovalView(discord.ui.View):
             await interaction.followup.send(f"Failed to approve: {message_content}", ephemeral=True)
 
     # Removed @discord.ui.button decorator
-    async def reject_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def reject_button_callback(self, interaction: discord.Interaction):
         custom_id_parts = interaction.data['custom_id'].split('_')
         try:
             proposal_id_from_custom_id = int(custom_id_parts[-1])
@@ -1211,9 +1291,9 @@ async def _perform_approve_campaign_action(admin_interaction_for_message_edit: d
         if campaign_proposals:
             for scenario_proposal in campaign_proposals:
                 if scenario_proposal['status'] == 'Pending Approval':
-                    await db.update_proposal_status(scenario_proposal['id'], "ApprovedScenario", set_requires_approval_false=True)
+                    await db.update_proposal_status(scenario_proposal['proposal_id'], "ApprovedScenario")
                     updated_scenario_count += 1
-                    print(f"DEBUG: Auto-approved existing scenario P#{scenario_proposal['id']} for newly approved C#{campaign_id}.")
+                    print(f"DEBUG: Auto-approved existing scenario P#{scenario_proposal['proposal_id']} for newly approved C#{campaign_id}.")
         if updated_scenario_count > 0:
             print(f"INFO: Updated {updated_scenario_count} existing pending scenarios to 'ApprovedScenario' for C#{campaign_id}.")
     except Exception as e_update_scenarios:
@@ -1814,4 +1894,78 @@ async def _send_admin_approval_notification(interaction: discord.Interaction, pr
             )
         except discord.HTTPException as e_followup:
             print(f"Error sending follow-up about admin notification send failure: {e_followup}")
+
+async def _update_campaign_control_panel(campaign_id: int, bot_instance: commands.Bot):
+    """Updates the campaign control panel message after scenarios are created or other state changes."""
+    try:
+        campaign_data = await db.get_campaign(campaign_id)
+        if not campaign_data:
+            print(f"WARN: Cannot update control panel for C#{campaign_id} - campaign not found")
+            return
+            
+        guild = bot_instance.get_guild(campaign_data['guild_id'])
+        if not guild:
+            print(f"WARN: Cannot update control panel for C#{campaign_id} - guild not found")
+            return
+            
+        # Get the campaign management channel
+        campaign_mgmt_channel_name = utils.CHANNELS.get("campaign_management", "campaign-management")
+        campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
+        
+        if not campaign_mgmt_channel:
+            print(f"WARN: Cannot update control panel for C#{campaign_id} - campaign management channel not found")
+            return
+            
+        # Get the control message ID
+        control_message_id = campaign_data.get('control_message_id')
+        if not control_message_id:
+            print(f"WARN: Cannot update control panel for C#{campaign_id} - no control message ID stored")
+            return
+            
+        try:
+            control_message = await campaign_mgmt_channel.fetch_message(control_message_id)
+        except discord.NotFound:
+            print(f"WARN: Control message {control_message_id} for C#{campaign_id} not found")
+            return
+        except discord.HTTPException as e:
+            print(f"ERROR: Failed to fetch control message for C#{campaign_id}: {e}")
+            return
+            
+        # Create updated view and embed
+        control_view = CampaignControlView(campaign_id, bot_instance)
+        await control_view.update_button_states()
+        
+        # Get creator for mention
+        creator = guild.get_member(campaign_data['creator_id'])
+        
+        # Create updated embed
+        embed_title = f"Campaign Management: '{campaign_data['title']}' (ID: C#{campaign_id})"
+        embed_description = f"**Creator:** {creator.mention if creator else f'ID: {campaign_data['creator_id']}'}\n"
+        embed_description += f"**Description:** {campaign_data['description'] or 'Not provided.'}\n"
+        embed_description += f"**Total Scenarios Expected:** {campaign_data['num_expected_scenarios']}\n"
+        embed_description += f"**Currently Defined:** {campaign_data['current_defined_scenarios']}"
+        
+        new_color = discord.Color.blue()
+        if campaign_data['status'] == 'active': 
+            new_color = discord.Color.green()
+        elif campaign_data['status'] == 'completed': 
+            new_color = discord.Color.gold()
+        elif campaign_data['status'] == 'setup': 
+            new_color = discord.Color.light_grey()
+            
+        updated_embed = discord.Embed(
+            title=embed_title,
+            description=embed_description,
+            color=new_color
+        )
+        updated_embed.add_field(name="Status", value=campaign_data['status'].title(), inline=True)
+        updated_embed.set_footer(text=f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
+        
+        # Update the message
+        await control_message.edit(embed=updated_embed, view=control_view)
+        print(f"DEBUG: Updated control panel for C#{campaign_id}")
+        
+    except Exception as e:
+        print(f"ERROR: Failed to update campaign control panel for C#{campaign_id}: {e}")
+        traceback.print_exc()
 
