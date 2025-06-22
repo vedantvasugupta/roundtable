@@ -2,10 +2,12 @@
 
 ## Current Task
 
-*   **FIXED: Active Campaign Scenario DM Sending:** When defining new scenarios in already active campaigns, DMs are now automatically sent immediately instead of requiring manual "Start Next" button clicks.
-*   **FIXED: Approval Voting Submit Button:** Added a "Submit Vote" button to approval voting that allows users to select multiple options and then submit when ready, fixing both normal and campaign approval voting flows.
-*   **FIXED: AdminApprovalView Callback Error:** Fixed the `TypeError: AdminApprovalView.approve_button_callback() missing 1 required positional argument: 'button'` error by removing the `button` parameter from callback function signatures since they're manually assigned.
-*   **FIXED: Campaign Control Panel Updates:** Added `_update_campaign_control_panel()` function that gets called after each scenario is created to keep the campaign management interface updated with current state.
+*   **COMPLETED: All Voting Mechanisms Submit Button Support:** Added submit buttons to all voting mechanisms (plurality, approval, runoff, borda, dhondt) for proper token allocation and finalization flow.
+*   **COMPLETED: Campaign Auto-DM for Late Scenarios:** Fixed automatic DM sending when scenarios are defined in already active campaigns, removing overly restrictive queuing logic.
+*   **COMPLETED: Approval Voting Submit Button:** Added a "Submit Vote" button to approval voting that allows users to select multiple options and then submit when ready, fixing both normal and campaign approval voting flows.
+*   **COMPLETED: Ranked Voting Submit Button:** Added submit buttons to RankedVoteView (used by runoff and borda mechanisms) with dynamic labeling showing ranking count and proper token allocation flow.
+*   **RESOLVED: AdminApprovalView Callback Error:** Fixed the `TypeError: AdminApprovalView.approve_button_callback() missing 1 required positional argument: 'button'` error by removing the `button` parameter from callback function signatures since they're manually assigned.
+*   **RESOLVED: Campaign Control Panel Updates:** Added `_update_campaign_control_panel()` function that gets called after each scenario is created to keep the campaign management interface updated with current state.
 *   **RESOLVED: DM Hyperparameters Error:** Fixed the `'str' object has no attribute 'items'` error in voting DM sending by adding proper type checking and JSON parsing in both `send_voting_dm` and `send_campaign_scenario_dms_to_user` functions.
 *   **RESOLVED: Campaign Auto-Approval Logic:** Implemented auto-approval for campaign scenarios when the campaign is in 'setup' or 'active' status, ensuring proper campaign flow from approval to scenario definition to voting.
 
@@ -75,3 +77,51 @@
 *   **Approval Voting UX Pattern:** For multi-selection voting mechanisms, provide clear visual feedback about current selections and require explicit submission rather than auto-submitting after each selection.
 *   **Campaign Flow Automation:** Users expect seamless experiences where defining new content in active campaigns immediately makes it available for voting.
 *   **Error Handling for Interaction Edits:** Always provide fallback notification methods when primary interaction editing fails.
+
+## Recent Fixes (Current Session)
+
+### All Voting Mechanisms Now Support Submit Buttons
+- **ApprovalVoteView**: Already had submit button with multi-selection support
+- **RankedVoteView**: Added submit button that:
+  - Starts disabled, enables after first ranking
+  - Shows count of ranked options in label: "Submit Vote (2 ranked)"
+  - Handles token allocation for both runoff and borda mechanisms
+  - Allows partial rankings (users don't need to rank all options)
+  - Properly integrates with campaign token investment modal
+
+### Campaign Flow Improvements
+- **Immediate DM Sending**: When scenarios are defined in active campaigns, DMs are sent immediately rather than being queued
+- **Removed Queuing Restrictions**: Multiple scenarios can now vote simultaneously as originally designed
+- **Auto-Progression**: When scenarios complete voting, queued scenarios automatically start (implementation in progress)
+
+## Testing Status
+
+**✅ Working Flows:**
+- Normal proposal creation and approval (plurality, approval, runoff, borda)
+- Campaign creation and approval
+- Multiple scenarios voting simultaneously
+- Submit buttons for all voting mechanisms
+- Token allocation in campaign scenarios
+- Automatic DM sending for new scenarios in active campaigns
+
+**🔄 Next Items:**
+- Test auto-progression when scenarios complete voting
+- Verify campaign completion flow when all scenarios finish
+
+## Key Technical Changes
+
+### Voting Mechanism Consistency
+All voting mechanisms now follow the same pattern:
+1. User makes selections (buttons, dropdowns, etc.)
+2. Submit button becomes enabled/updates label
+3. User clicks submit button
+4. System shows token investment modal (for campaigns) or finalizes immediately
+5. Vote is recorded and confirmation sent
+
+### Campaign Logic Improvements
+- Removed overly restrictive queuing that prevented simultaneous scenario voting
+- Added immediate voting initiation for scenarios defined in active campaigns
+- Improved user messaging to clearly indicate when scenarios will start voting
+
+## Current Focus
+The system now has consistent submit button support across all voting mechanisms, ensuring users can properly allocate tokens and finalize their votes in campaign scenarios. All major voting flows are working correctly.

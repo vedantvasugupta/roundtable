@@ -491,6 +491,17 @@ class RankedVoteView(BaseVoteView):
         # Add the initial select menu (it will be on row 0 by default if no other row 0 items are added first,
         # or if its row is explicitly set to 0)
         self._add_rank_select_menu()
+        
+        # Add Submit Vote button (initially disabled)
+        self.submit_button = discord.ui.Button(
+            label="Submit Vote",
+            style=discord.ButtonStyle.success,
+            custom_id=f"submit_ranked_{self.proposal_id}",
+            disabled=True,
+            row=4  # Place on bottom row
+        )
+        self.submit_button.callback = self.submit_vote_button_callback
+        self.add_item(self.submit_button)
 
     def _add_rank_select_menu(self):
         """Helper to create and add a select menu for the next ranking position"""
@@ -558,6 +569,11 @@ class RankedVoteView(BaseVoteView):
 
         self._ranked_options.append(selected_option_value)
 
+        # Update submit button state - enable if at least one option is ranked
+        self.submit_button.disabled = False
+        # Update submit button label to show count
+        self.submit_button.label = f"Submit Vote ({len(self._ranked_options)} ranked)"
+
         self._add_rank_select_menu()  # Adds the next select menu
 
         await interaction.response.edit_message(view=self)
@@ -571,12 +587,24 @@ class RankedVoteView(BaseVoteView):
         if remaining_options_after:
             status += f"\n*Remaining options to rank: {len(remaining_options_after)}*"
         else:
-            status += "\n*All options ranked! You can now submit your vote.*"
+            status += "\n*All options ranked! Click 'Submit Vote' to finalize.*"
 
         if len(status) > 2000:
             status = status[:1997] + "..."
 
         await interaction.followup.send(status, ephemeral=True)
+        
+    async def submit_vote_button_callback(self, interaction: discord.Interaction):
+        """Handle the submit vote button click"""
+        if not self.has_selection():
+            await interaction.response.send_message("Please rank at least one option before submitting.", ephemeral=True)
+            return
+            
+        # Set the mechanism vote data
+        self.selected_mechanism_vote_data = self.get_mechanism_vote_data()
+        
+        # Call the base submit callback which handles token investment logic
+        await self.submit_vote_callback(interaction)
 
 
 class ApprovalVoteView(BaseVoteView):
