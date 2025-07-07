@@ -1071,88 +1071,44 @@ async def ping(ctx):
 
 @bot.command(name="dummy")
 async def dummy_proposal(ctx):
-    """Create a dummy proposal for testing purposes"""
+    """Create a simple plurality proposal and start voting without approval."""
     try:
-        # Generate a random title with timestamp
-        import random
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         title = f"Test Proposal {timestamp}"
+        description = (
+            f"This is a test proposal created at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
+        )
 
-        # Generate random description
-        description = f"This is a test proposal created at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
+        options = ["Option A", "Option B", "Option C"]
+        deadline = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S.%f")
 
-        # Generate random options (2-5)
-        num_options = random.randint(2, 5)
-        options = [f"Option {chr(65+i)}" for i in range(num_options)]  # A, B, C, D, E
-        print(f"DEBUG: Generated {num_options} options for dummy proposal: {options}")
-
-        # Choose a random voting mechanism
-        mechanisms = ["plurality", "borda", "approval", "runoff", "dhondt"]
-        voting_mechanism = random.choice(mechanisms)
-
-        # Set deadline to 1 day from now
-        deadline_days = 1
-
-        # Use the author of the message as the proposer
-        proposer = ctx.author
-        print(f"DEBUG: Creating dummy proposal with proposer: {proposer.name} (ID: {proposer.id})")
-
-        # Create a custom interaction-like object that has both user and author attributes
-        # This ensures compatibility with both interaction and context handling
-        class CustomContext:
-            def __init__(self, ctx):
-                self.ctx = ctx
-                self.guild = ctx.guild
-                self.author = ctx.author
-                self.user = ctx.author  # Add user attribute pointing to author
-                self.send = ctx.send
-
-                # Add followup attribute to handle interaction.followup.send() calls
-                class FollowupSender:
-                    def __init__(self, ctx):
-                        self.ctx = ctx
-
-                    async def send(self, *args, **kwargs):
-                        # Remove ephemeral parameter if present since it's not supported in ctx.send
-                        if 'ephemeral' in kwargs:
-                            del kwargs['ephemeral']
-                        return await self.ctx.send(*args, **kwargs)
-
-                self.followup = FollowupSender(ctx)
-
-                # Add response attribute to handle interaction.response calls
-                class ResponseHandler:
-                    def __init__(self, ctx):
-                        self.ctx = ctx
-
-                    async def send_message(self, *args, **kwargs):
-                        # Remove ephemeral parameter if present
-                        if 'ephemeral' in kwargs:
-                            del kwargs['ephemeral']
-                        return await self.ctx.send(*args, **kwargs)
-
-                    async def edit_message(self, *args, **kwargs):
-                        # This is a no-op in the context case
-                        return None
-
-                    async def defer(self, *args, **kwargs):
-                        # This is a no-op in the context case
-                        return None
-
-                self.response = ResponseHandler(ctx)
-
-            async def send(self, *args, **kwargs):
-                return await self.ctx.send(*args, **kwargs)
-
-        custom_ctx = CustomContext(ctx)
-
-        # Create the proposal using the custom context
-        proposal_id = await proposals.create_proposal(
-            ctx, title, description, voting_mechanism, options, deadline_days
+        proposal_id = await db.create_proposal(
+            server_id=ctx.guild.id,
+            proposer_id=ctx.author.id,
+            title=title,
+            description=description,
+            voting_mechanism="plurality",
+            deadline=deadline,
+            requires_approval=False,
+            hyperparameters=None,
+            campaign_id=None,
+            scenario_order=None,
+            # Start in a non-voting state so initiate_voting_for_proposal can
+            # handle announcements and DM distribution
+            initial_status="Pending",
         )
 
         if proposal_id:
-            await ctx.send(f"✅ Created dummy proposal #{proposal_id} with {num_options} options using {voting_mechanism} voting mechanism.")
+            await db.add_proposal_options(proposal_id, options)
+            success, msg = await voting_utils.initiate_voting_for_proposal(ctx.guild, proposal_id, bot)
+            if success:
+                await ctx.send(
+                    f"✅ Dummy proposal #{proposal_id} created and voting started."
+                )
+            else:
+                await ctx.send(
+                    f"⚠️ Proposal #{proposal_id} created but voting failed: {msg}"
+                )
         else:
             await ctx.send("❌ Failed to create dummy proposal.")
 
