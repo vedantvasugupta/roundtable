@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
 import db
-import voting
+import voting_utils
 import proposals
 
 class TestVoteResults(unittest.TestCase):
@@ -63,6 +63,10 @@ class TestVoteResults(unittest.TestCase):
         
         # Add channels to guild
         self.guild.text_channels = [self.results_channel, self.proposals_channel]
+
+        import main
+        main.bot = self.bot
+        self.bot.get_guild.return_value = self.guild
         
         # Set up mock discord.utils.get
         def mock_get(iterable, **attrs):
@@ -134,7 +138,7 @@ class TestVoteResults(unittest.TestCase):
         asyncio.run(self.add_test_votes(proposal_id))
         
         # Close the proposal
-        results = asyncio.run(voting.close_proposal(proposal_id))
+        results = asyncio.run(voting_utils.close_proposal(proposal_id, self.guild))
         
         # Check that results were generated
         self.assertIsNotNone(results)
@@ -162,7 +166,7 @@ class TestVoteResults(unittest.TestCase):
         await self.add_test_votes(proposal_id)
         
         # Close the proposal
-        results = await voting.close_proposal(proposal_id)
+        results = await voting_utils.close_proposal(proposal_id, self.guild)
         
         # Get the proposal
         proposal = await db.get_proposal(proposal_id)
@@ -180,7 +184,7 @@ class TestVoteResults(unittest.TestCase):
         asyncio.run(self.setup_past_deadline_proposal())
         
         # Check for expired proposals
-        closed_proposals = asyncio.run(voting.check_expired_proposals())
+        closed_proposals = asyncio.run(voting_utils.check_expired_proposals())
         
         # Check that proposal was found and closed
         self.assertEqual(len(closed_proposals), 1)
@@ -227,7 +231,7 @@ class TestVoteResults(unittest.TestCase):
         self.assertEqual(len(votes), 2)
         
         # Close proposal
-        results = asyncio.run(voting.close_proposal(proposal_id))
+        results = asyncio.run(voting_utils.close_proposal(proposal_id, self.guild))
         self.assertIsNotNone(results)
         
         # Get proposal

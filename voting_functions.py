@@ -54,7 +54,7 @@ async def process_vote(user_id, proposal_id, vote_data):
 
             print("Number of votes:", len(all_votes), "Eligible count:", eligible_count)
             if len(all_votes) >= eligible_count and eligible_count > 0:
-                results = await close_proposal(proposal_id)
+                results = await close_proposal(proposal_id, guild)
 
                 # ── 3a. flag proposal & announce instantly ───────────────────
                 if results:
@@ -73,7 +73,7 @@ async def process_vote(user_id, proposal_id, vote_data):
     return True, message
 
 
-async def close_proposal(proposal_id):
+async def close_proposal(proposal_id, guild):
     """Close a proposal and tally the votes"""
     # Get proposal details
     proposal = await db.get_proposal(proposal_id)
@@ -113,7 +113,10 @@ async def check_expired_proposals():
         deadline = datetime.fromisoformat(proposal['deadline'].replace('Z', '+00:00'))
         if now > deadline:
             # Close the proposal
-            results = await close_proposal(proposal['proposal_id'])
+            import main
+            bot = main.bot
+            guild = bot.get_guild(proposal['server_id'])
+            results = await close_proposal(proposal['proposal_id'], guild)
             if results:
                 closed_proposals.append((proposal, results))
 

@@ -127,7 +127,10 @@ async def check_expired_proposals():
                     
                     # Close the proposal and get results
                     proposal_id = proposal.get('proposal_id', proposal.get('id'))
-                    results = await close_proposal(proposal_id)
+                    # Obtain guild using bot from main
+                    import main
+                    guild = main.bot.get_guild(proposal['server_id'])
+                    results = await close_proposal(proposal_id, guild)
                     
                     if results:
                         closed_proposals.append((proposal, results))
@@ -144,7 +147,7 @@ async def check_expired_proposals():
         return []
 
 # Fix for the close_proposal function in voting.py
-async def close_proposal(proposal_id):
+async def close_proposal(proposal_id, guild):
     """Close a proposal and tally the votes"""
     try:
         # Get proposal details
