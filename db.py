@@ -166,6 +166,18 @@ CREATE TABLE IF NOT EXISTS pending_proposal_notifications (
 );
 """
 
+# Define CREATE_PROPOSAL_NOTES_TABLE
+CREATE_PROPOSAL_NOTES_TABLE = """
+CREATE TABLE IF NOT EXISTS proposal_notes (
+    note_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id INTEGER NOT NULL,
+    note_type TEXT NOT NULL,
+    note_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (proposal_id) REFERENCES proposals(proposal_id) ON DELETE CASCADE
+);
+"""
+
 CREATE_PROPOSALS_TABLE = """
 CREATE TABLE IF NOT EXISTS proposals (
     proposal_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1271,6 +1283,7 @@ async def init_db() -> None:
         CREATE_PROPOSALS_TABLE, # This will use the updated definition
         CREATE_PROPOSAL_OPTIONS_TABLE,
         CREATE_PROPOSAL_RESULTS_TABLE, # Added
+        CREATE_PROPOSAL_NOTES_TABLE,
         CREATE_VOTES_TABLE,
         CREATE_PROPOSAL_VOTE_IDS_TABLE,
         CREATE_CAMPAIGN_VOTE_IDS_TABLE,
