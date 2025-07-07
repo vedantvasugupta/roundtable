@@ -302,6 +302,7 @@ async def constitution(ctx):
     • `!set_constitutional_var proposal_requires_approval false` - Allow proposals to skip admin approval
     • `!set_constitutional_var eligible_voters_role everyone` - Allow everyone to vote on proposals
     • `!set_constitutional_var warning_threshold 5` - Increase warning threshold to 5
+    • `!set_constitutional_var vote_privacy anonymous` - Hide voter names in audits
     """
 
     main_embed.add_field(name="Examples", value=examples_text, inline=False)
@@ -1233,6 +1234,37 @@ async def track_votes(ctx, proposal_id: int):
         await ctx.send(f"❌ Error tracking votes: {e}")
 
 
+@bot.command(name="audit")
+@commands.has_permissions(administrator=True)
+async def audit(ctx, proposal_id: int):
+    """Display who voted what for a proposal respecting vote privacy."""
+    proposal = await db.get_proposal(proposal_id)
+    if not proposal:
+        await ctx.send(f"❌ Proposal #{proposal_id} not found.")
+        return
+
+    votes = await db.get_proposal_votes(proposal_id)
+    if not votes:
+        await ctx.send("No votes recorded.")
+        return
+
+    const_vars = await db.get_constitutional_variables(ctx.guild.id)
+    privacy = const_vars.get("vote_privacy", {}).get("value", "public")
+
+    lines = []
+    for vote in votes:
+        user_id = vote["user_id"]
+        vote_data = vote.get("vote_data")
+        if privacy == "anonymous":
+            voter = await db.get_or_create_vote_identifier(ctx.guild.id, user_id, proposal_id, proposal.get("campaign_id"))
+        else:
+            member = ctx.guild.get_member(user_id)
+            voter = member.display_name if member else str(user_id)
+        lines.append(f"{voter}: {vote_data}")
+
+    await ctx.send(f"**Vote Audit for Proposal #{proposal_id}**\n" + "\n".join(lines))
+
+
 @bot.command(name="announce_results")
 @commands.has_permissions(administrator=True)
 async def announce_results_command(ctx, proposal_id: int = None):
@@ -1317,6 +1349,7 @@ async def help_guide(ctx):
             "• `!dummy` - Create a test proposal with random options\n"
             "• `!terminate <id>` - Terminate a proposal early (admin only)\n"
             "• `!track <id>` - Show vote tracking for a proposal\n"
+            "• `!audit <id>` - Display who voted for what (admin only)\n"
             "• `!announce_results [id]` - Announce results for a specific proposal or all pending results (admin only)"
         ),
         inline=False

@@ -49,6 +49,13 @@ async def process_vote(user_id: int, proposal_id: int, vote_data_dict: Dict[str,
                 # return False, "Error processing proposal deadline."
                 pass # Or let it proceed if parsing fails, though this might be too lenient
 
+        const_vars = await db.get_constitutional_variables(proposal['server_id'])
+        privacy = const_vars.get('vote_privacy', {}).get('value', 'public')
+        if privacy == 'anonymous':
+            await db.get_or_create_vote_identifier(
+                proposal['server_id'], user_id, proposal_id, proposal.get('campaign_id')
+            )
+
         # vote_data_dict is the mechanism-specific data (e.g., {'option': 'A'} or {'rankings': ['A', 'B']})
         # It should already be validated by the view/modal before this stage.
         vote_json_str = json.dumps(vote_data_dict)
