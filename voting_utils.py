@@ -830,8 +830,27 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         status_determined = "Passed" if results and results.get('winner') is not None else "Failed"
         print(f"DEBUG: Calculated status for proposal {proposal_id}: {status_determined}")
 
-        # Map "Failed" to "Closed" for DB storage
-        db_status_to_set = "Closed" if status_determined == "Failed" else status_determined
+        # Map computed status to an allowed DB value
+        db_status_to_set = "Closed"
+        if status_determined == "Passed":
+            db_status_to_set = "Closed"
+        elif status_determined == "Failed":
+            db_status_to_set = "Closed"
+        else:
+            db_status_to_set = status_determined
+
+        allowed_statuses = [
+            "Pending",
+            "Voting",
+            "Closed",
+            "Cancelled",
+            "Pending Approval",
+            "Rejected",
+            "ApprovedScenario",
+        ]
+        if db_status_to_set not in allowed_statuses:
+            print(f"WARNING: Invalid status '{db_status_to_set}' derived from '{status_determined}', defaulting to 'Closed'")
+            db_status_to_set = "Closed"
 
         # Update the proposal status in the database
         await db.update_proposal_status(proposal_id, db_status_to_set)

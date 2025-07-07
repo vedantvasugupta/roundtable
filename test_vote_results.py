@@ -12,13 +12,14 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
+import sqlite3
 
 # Add the current directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
 import db
-import voting
+import voting_utils
 import proposals
 
 class TestVoteResults(unittest.TestCase):
@@ -134,7 +135,7 @@ class TestVoteResults(unittest.TestCase):
         asyncio.run(self.add_test_votes(proposal_id))
         
         # Close the proposal
-        results = asyncio.run(voting.close_proposal(proposal_id))
+        results = asyncio.run(voting_utils.close_proposal(proposal_id))
         
         # Check that results were generated
         self.assertIsNotNone(results)
@@ -147,7 +148,18 @@ class TestVoteResults(unittest.TestCase):
         
         # Get the proposal to check status
         proposal = asyncio.run(db.get_proposal(proposal_id))
-        self.assertIn(proposal['status'], ['Passed', 'Failed'])
+        self.assertEqual(proposal['status'], 'Closed')
+
+    def test_close_proposal_integrity(self):
+        """Ensure closing a proposal does not raise IntegrityError."""
+        proposal_id = asyncio.run(self.create_test_proposal())
+        asyncio.run(self.add_test_votes(proposal_id))
+        try:
+            asyncio.run(voting_utils.close_proposal(proposal_id))
+        except sqlite3.IntegrityError as e:
+            self.fail(f"IntegrityError raised: {e}")
+        proposal = asyncio.run(db.get_proposal(proposal_id))
+        self.assertEqual(proposal['status'], 'Closed')
     
     @patch('proposals.get_or_create_channel')
     async def test_close_and_announce_results(self, mock_get_or_create_channel):
@@ -162,7 +174,7 @@ class TestVoteResults(unittest.TestCase):
         await self.add_test_votes(proposal_id)
         
         # Close the proposal
-        results = await voting.close_proposal(proposal_id)
+        results = await voting_utils.close_proposal(proposal_id)
         
         # Get the proposal
         proposal = await db.get_proposal(proposal_id)
@@ -180,7 +192,7 @@ class TestVoteResults(unittest.TestCase):
         asyncio.run(self.setup_past_deadline_proposal())
         
         # Check for expired proposals
-        closed_proposals = asyncio.run(voting.check_expired_proposals())
+        closed_proposals = asyncio.run(voting_utils.check_expired_proposals())
         
         # Check that proposal was found and closed
         self.assertEqual(len(closed_proposals), 1)
@@ -227,12 +239,12 @@ class TestVoteResults(unittest.TestCase):
         self.assertEqual(len(votes), 2)
         
         # Close proposal
-        results = asyncio.run(voting.close_proposal(proposal_id))
+        results = asyncio.run(voting_utils.close_proposal(proposal_id))
         self.assertIsNotNone(results)
         
         # Get proposal
         proposal = asyncio.run(db.get_proposal(proposal_id))
-        self.assertIn(proposal['status'], ['Passed', 'Failed'])
+        self.assertEqual(proposal['status'], 'Closed')
         
         # Announce results
         with patch('proposals.get_or_create_channel') as mock_get_channel:
