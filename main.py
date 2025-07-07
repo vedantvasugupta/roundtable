@@ -966,6 +966,12 @@ async def see_settings(ctx, category: str = None):
             "values": ["Muted", "<role_name>"],
             "example": "!set_constitutional_var mute_role Muted",
             "current": None
+        },
+        "vote_privacy": {
+            "description": "Whether audit displays names ('public') or anonymous IDs",
+            "values": ["public", "anonymous"],
+            "example": "!set_constitutional_var vote_privacy anonymous",
+            "current": None
         }
     }
 

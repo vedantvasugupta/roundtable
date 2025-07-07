@@ -361,6 +361,11 @@ async def init_constitutional_variables(server_id):
             "value": "Muted",
             "type": "role",
             "description": "Role to assign when muting a user"
+        },
+        "vote_privacy": {
+            "value": "public",
+            "type": "text",
+            "description": "Visibility of voter identities in audits: 'public' or 'anonymous'"
         }
     }
     current_time_iso = datetime.utcnow().isoformat() # Get current time
