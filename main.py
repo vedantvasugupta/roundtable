@@ -1093,7 +1093,10 @@ async def dummy_proposal(ctx):
             hyperparameters=None,
             campaign_id=None,
             scenario_order=None,
-            initial_status="Voting",
+            # Start in a non-voting state so initiate_voting_for_proposal can
+            # handle announcements and DM distribution
+            initial_status="Pending",
+
         )
 
         if proposal_id:
