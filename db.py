@@ -90,6 +90,36 @@ CREATE TABLE IF NOT EXISTS votes (
 );
 """
 
+# Define table for proposal vote identifiers
+CREATE_PROPOSAL_VOTE_IDS_TABLE = """
+CREATE TABLE IF NOT EXISTS proposal_vote_ids (
+    server_id INTEGER NOT NULL,
+    proposal_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    identifier TEXT NOT NULL,
+    PRIMARY KEY (proposal_id, user_id),
+    UNIQUE (proposal_id, identifier),
+    FOREIGN KEY (proposal_id) REFERENCES proposals(proposal_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (server_id) REFERENCES servers(server_id) ON DELETE CASCADE
+);
+"""
+
+# Define table for campaign vote identifiers
+CREATE_CAMPAIGN_VOTE_IDS_TABLE = """
+CREATE TABLE IF NOT EXISTS campaign_vote_ids (
+    server_id INTEGER NOT NULL,
+    campaign_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    identifier TEXT NOT NULL,
+    PRIMARY KEY (campaign_id, user_id),
+    UNIQUE (campaign_id, identifier),
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (server_id) REFERENCES servers(server_id) ON DELETE CASCADE
+);
+"""
+
 # New table for campaigns (MOVED TO TOP)
 CREATE_CAMPAIGNS_TABLE = """
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -361,6 +391,11 @@ async def init_constitutional_variables(server_id):
             "value": "Muted",
             "type": "role",
             "description": "Role to assign when muting a user"
+        },
+        "vote_privacy": {
+            "value": "public",
+            "type": "text",
+            "description": "Visibility of voter identities in audits: 'public' or 'anonymous'"
         }
     }
     current_time_iso = datetime.utcnow().isoformat() # Get current time
@@ -953,6 +988,47 @@ async def record_vote(
         return False
 
 
+# --- Anonymous Vote Identifier Helpers ---
+ADJECTIVES = ["Red", "Blue", "Green", "Swift", "Lucky", "Brave", "Bright", "Misty", "Bold", "Sunny"]
+NOUNS = ["Fox", "Bear", "Wolf", "Hawk", "Lion", "Eagle", "Otter", "Panda", "Tiger", "Koala"]
+
+def _generate_identifier() -> str:
+    """Generate a short, human-readable identifier."""
+    import secrets
+
+    adjective = secrets.choice(ADJECTIVES)
+    noun = secrets.choice(NOUNS)
+    number = secrets.randbelow(100)
+    return f"{adjective}{noun}{number:02d}"
+
+async def get_or_create_vote_identifier(server_id: int, user_id: int, proposal_id: int, campaign_id: Optional[int] = None) -> str:
+    """Return a persistent identifier for a user within a proposal or campaign."""
+    async with get_db() as conn:
+        if campaign_id is not None:
+            query = "SELECT identifier FROM campaign_vote_ids WHERE campaign_id=? AND user_id=?"
+            params = (campaign_id, user_id)
+        else:
+            query = "SELECT identifier FROM proposal_vote_ids WHERE proposal_id=? AND user_id=?"
+            params = (proposal_id, user_id)
+        async with conn.execute(query, params) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return row[0]
+
+        identifier = _generate_identifier()
+        if campaign_id is not None:
+            await conn.execute(
+                "INSERT INTO campaign_vote_ids (server_id, campaign_id, user_id, identifier) VALUES (?, ?, ?, ?)",
+                (server_id, campaign_id, user_id, identifier)
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO proposal_vote_ids (server_id, proposal_id, user_id, identifier) VALUES (?, ?, ?, ?)",
+                (server_id, proposal_id, user_id, identifier)
+            )
+        await conn.commit()
+        return identifier
+
 # ========================
 # 🔹 WARNING SYSTEM
 # ========================
@@ -1196,6 +1272,8 @@ async def init_db() -> None:
         CREATE_PROPOSAL_OPTIONS_TABLE,
         CREATE_PROPOSAL_RESULTS_TABLE, # Added
         CREATE_VOTES_TABLE,
+        CREATE_PROPOSAL_VOTE_IDS_TABLE,
+        CREATE_CAMPAIGN_VOTE_IDS_TABLE,
         CREATE_WARNINGS_TABLE,
         CREATE_TEMP_MODERATION_TABLE,
         CREATE_PENDING_PROPOSAL_NOTIFICATIONS_TABLE, # Added this line
