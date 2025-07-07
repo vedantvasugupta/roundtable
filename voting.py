@@ -833,6 +833,22 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
         else:
             embed_content += "\n**Deadline:** Not set.\n"
 
+        # Determine vote privacy settings and fetch anonymous identifier if needed
+        const_vars = await db.get_constitutional_variables(proposal['server_id'])
+        privacy = const_vars.get('vote_privacy', {}).get('value', 'public')
+        identifier_embed = None
+        vote_identifier = None
+        if privacy == 'anonymous':
+            vote_identifier = await db.get_or_create_vote_identifier(
+                proposal['server_id'], member.id, proposal_id, campaign_id
+            )
+            identifier_embed = discord.Embed(
+                description=(
+                    f"Your anonymous voting identifier is **{vote_identifier}**."
+                ),
+                color=discord.Color.gold(),
+            )
+
         # Construct the view
         view_args = {
             "proposal_id": proposal_id,
@@ -864,8 +880,11 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
         # Create embed
         embed = discord.Embed(description=embed_content, color=discord.Color.blue())
 
-        # Send DM
-        await member.send(embed=embed, view=vote_view)
+        # Send DM including identifier embed when applicable
+        if identifier_embed:
+            await member.send(embeds=[embed, identifier_embed], view=vote_view)
+        else:
+            await member.send(embed=embed, view=vote_view)
         print(f"✅ Voting DM sent to {member.name} for proposal #{proposal_id} (Mechanism: {mechanism}, Options: {len(options)}, Allow Abstain: {allow_abstain})")
         return True
     except discord.Forbidden:
