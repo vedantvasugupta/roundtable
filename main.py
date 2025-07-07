@@ -1190,11 +1190,8 @@ async def terminate_proposal(ctx, proposal_id: int):
             # Debug print to show results were calculated
             print(f"DEBUG: Results calculated for proposal #{proposal_id}: {results}")
 
-            # Update proposal status to reflect the result
-            status = "Passed" if results.get('winner') else "Failed"
-            await db.update_proposal_status(proposal_id, status)
-
-            # Get the updated proposal with the new status
+            # close_proposal already updates the proposal status to 'Closed'
+            # Retrieve the updated proposal record
             proposal = await db.get_proposal(proposal_id)
 
             # Import and use close_and_announce_results
