@@ -1184,7 +1184,7 @@ async def terminate_proposal(ctx, proposal_id: int):
         print(f"DEBUG: Terminating proposal #{proposal_id} early")
 
         # Call the imported close_proposal from voting_utils
-        results = await close_proposal(proposal_id)
+        results = await close_proposal(proposal_id, ctx.guild)
 
         if results:
             # Debug print to show results were calculated

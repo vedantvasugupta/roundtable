@@ -752,8 +752,13 @@ async def check_expired_proposals() -> List[Dict]:
                     f"TASK: Closing expired proposal #{proposal['proposal_id']}: {proposal['title']}")
 
                 # Close the proposal and calculate results
+                # Obtain guild for this proposal
+                import main
+                bot = main.bot
+                guild = bot.get_guild(proposal['server_id'])
+
                 # This function will update status and store results internally
-                results = await close_proposal(proposal['proposal_id'])
+                results = await close_proposal(proposal['proposal_id'], guild)
 
                 if results:
                     # Add the proposal (with updated status) to the list for announcement
@@ -784,7 +789,7 @@ async def check_expired_proposals() -> List[Dict]:
         return []
 
 
-async def close_proposal(proposal_id: int) -> Optional[Dict]:
+async def close_proposal(proposal_id: int, guild: discord.Guild) -> Optional[Dict]:
     """
     Close a proposal, calculate results, update status, and store results.
     Returns the calculated results dictionary or None on failure.
