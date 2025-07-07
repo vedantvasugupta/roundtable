@@ -1096,6 +1096,7 @@ async def dummy_proposal(ctx):
             # Start in a non-voting state so initiate_voting_for_proposal can
             # handle announcements and DM distribution
             initial_status="Pending",
+
         )
 
         if proposal_id:
