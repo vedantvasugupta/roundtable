@@ -1329,6 +1329,7 @@ async def _perform_approve_campaign_action(admin_interaction_for_message_edit: d
         embed_title = f"Campaign Management: '{campaign_data['title']}' (ID: C#{campaign_id})"
         creator_display = creator.mention if creator else f"ID: {campaign_data['creator_id']}"
         embed_description = f"**Creator:** {creator_display}\n"
+
         embed_description += f"**Description:** {campaign_data['description'] or 'Not provided.'}\n"
         embed_description += f"**Total Scenarios Expected:** {campaign_data['num_expected_scenarios']}\n"
         embed_description += f"**Currently Defined:** {campaign_data['current_defined_scenarios']}"
@@ -1730,6 +1731,7 @@ class CampaignControlView(discord.ui.View):
                 campaign_title = campaign["title"]
                 action_taken_message = f"Campaign C#{self.campaign_id} ('{campaign_title}') is now active!\n"
 
+
                 # Initiate voting for all found scenarios
                 success_init_stage, msg_init_stage = await voting_utils.initiate_campaign_stage_voting(guild, self.campaign_id, scenarios_to_start_ids, bot_instance)
 
@@ -1790,6 +1792,7 @@ class CampaignControlView(discord.ui.View):
         else:
             campaign_status = campaign["status"]
             action_taken_message = f"Campaign C#{self.campaign_id} is in status '{campaign_status}'. No action taken."
+
             action_error = True
 
         # Update the control panel message (embed and view)
@@ -1805,6 +1808,7 @@ class CampaignControlView(discord.ui.View):
                 embed_title = f"Campaign Management: '{campaign['title']}' (ID: C#{self.campaign_id})"
                 creator_display = creator.mention if creator else f"ID: {campaign['creator_id']}"
                 embed_desc = f"**Creator:** {creator_display}\n"
+
                 embed_desc += f"**Description:** {campaign['description'] or 'Not provided.'}\n"
                 embed_desc += f"**Total Scenarios Expected:** {campaign['num_expected_scenarios']}\n"
                 embed_desc += f"**Currently Defined:** {campaign['current_defined_scenarios']}"
@@ -1946,6 +1950,7 @@ async def _update_campaign_control_panel(campaign_id: int, bot_instance: command
         embed_title = f"Campaign Management: '{campaign_data['title']}' (ID: C#{campaign_id})"
         creator_display = creator.mention if creator else f"ID: {campaign_data['creator_id']}"
         embed_description = f"**Creator:** {creator_display}\n"
+
         embed_description += f"**Description:** {campaign_data['description'] or 'Not provided.'}\n"
         embed_description += f"**Total Scenarios Expected:** {campaign_data['num_expected_scenarios']}\n"
         embed_description += f"**Currently Defined:** {campaign_data['current_defined_scenarios']}"
