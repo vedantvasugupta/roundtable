@@ -728,11 +728,18 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
         embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
         embed.add_field(name="Total Weighted Ballot Power", value=str(results.get('total_weighted_ballot_power', 0)), inline=True)
         embed.add_field(name="Round Details", value="\n".join([f"**Round {round_num}**\n" + round_text for round_num, round_text in enumerate(results['rounds_detailed'], 1)]), inline=False)
-    elif mechanism == 'dhondt':
-        embed.add_field(name="Seats to Allocate", value=str(results.get('num_seats_configured', 1)), inline=True)
-        embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
-        embed.add_field(name="Total Weighted Vote Power", value=str(results.get('total_weighted_vote_power', 0)), inline=True)
-        embed.add_field(name="Seat Allocation", value="\n".join([f"• {option}: {num_seats} ({party_total_w:.2f} weighted / {party_total_r} raw)" for option, num_seats, party_total_w, party_total_r in zip(results['options_ranked'], results['seats_allocated_detailed'].values(), results['party_totals_detailed'].values(), results['party_totals_detailed'].values())]), inline=False)
+    elif mechanism == 'condorcet':
+        pairwise_matrix = results.get('pairwise_results', {}) or results.get('pairwise_matrix', {})
+        pairwise_lines = []
+        for option, opponents in pairwise_matrix.items():
+            matchups = ", ".join([f"{opp}:{res}" for opp, res in opponents.items()])
+            pairwise_lines.append(f"{option} -> {matchups}")
+        pairwise_text = "\n".join(pairwise_lines) if pairwise_lines else "No pairwise data available"
+        embed.add_field(name="Pairwise Matchups", value=pairwise_text, inline=False)
+        if results.get('condorcet_winner'):
+            embed.add_field(name="Condorcet Verdict", value=f"Winner: {results['condorcet_winner']}", inline=True)
+        else:
+            embed.add_field(name="Condorcet Verdict", value="No Condorcet winner (cycle detected)", inline=True)
 
     # Add footer
     embed.set_footer(text=f"Results for Proposal #{proposal_id} | Calculated at {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
