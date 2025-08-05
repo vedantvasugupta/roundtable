@@ -11,8 +11,8 @@ from typing import List, Optional, Dict, Any, Union
 # Local project imports
 import db
 import utils
-import voting
 import voting_utils
+import voting
 
 # Enable all intents (or specify only the necessary ones)
 intents = discord.Intents.default()
@@ -1949,4 +1949,114 @@ async def _update_campaign_control_panel(campaign_id: int, bot_instance: command
     except Exception as e:
         print(f"ERROR: Failed to update campaign control panel for C#{campaign_id}: {e}")
         traceback.print_exc()
+
+
+async def _generate_campaign_completion_summary(campaign_id: int) -> Optional[discord.Embed]:
+    """Build an embed summarizing a completed campaign."""
+    try:
+        campaign = await db.get_campaign(campaign_id)
+        if not campaign:
+            return None
+
+        proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=campaign["guild_id"])
+        proposals.sort(key=lambda p: p.get("scenario_order", 0))
+
+        embed = discord.Embed(
+            title=f"Campaign Summary: '{campaign['title']}' (C#{campaign_id})",
+            description=campaign.get("description") or "No description provided.",
+            color=discord.Color.gold(),
+        )
+        for proposal in proposals:
+            order = proposal.get("scenario_order", "?")
+            title = proposal.get("title", "Untitled")
+            status = proposal.get("status", "Unknown")
+            embed.add_field(
+                name=f"Scenario S#{order}: {title}",
+                value=f"Status: {status}",
+                inline=False,
+            )
+        return embed
+    except Exception as e:
+        print(f"ERROR: Failed to generate campaign completion summary for C#{campaign_id}: {e}")
+        return None
+
+
+class CampaignCompletionView(discord.ui.View):
+    def __init__(self, campaign_id: int, bot_instance: commands.Bot):
+        super().__init__(timeout=None)
+        self.campaign_id = campaign_id
+        self.bot = bot_instance
+        bot_instance.add_view(self)
+
+        archive_btn = discord.ui.Button(
+            label="Archive Campaign",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"campaign_archive_{campaign_id}",
+            emoji="📦",
+        )
+        archive_btn.callback = self.archive_campaign_callback
+        self.add_item(archive_btn)
+
+        summary_btn = discord.ui.Button(
+            label="View Full Summary",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"campaign_view_summary_{campaign_id}",
+            emoji="📊",
+        )
+        summary_btn.callback = self.view_summary_callback
+        self.add_item(summary_btn)
+
+    async def _user_has_permission(self, interaction: discord.Interaction) -> bool:
+        campaign = await db.get_campaign(self.campaign_id)
+        if not campaign:
+            await interaction.response.send_message("Campaign not found.", ephemeral=True)
+            return False
+        is_creator = interaction.user.id == campaign.get("creator_id")
+        is_admin = interaction.user.guild_permissions.administrator
+        if not (is_creator or is_admin):
+            await interaction.response.send_message("You do not have permission for this action.", ephemeral=True)
+            return False
+        return True
+
+    async def archive_campaign_callback(self, interaction: discord.Interaction):
+        if not await self._user_has_permission(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            success = await db.update_campaign_status(self.campaign_id, "archived")
+            if not success:
+                await interaction.followup.send("Failed to archive campaign.", ephemeral=True)
+                return
+
+            for item in self.children:
+                item.disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except discord.HTTPException as e:
+                print(f"WARN: Failed to edit message for archiving C#{self.campaign_id}: {e}")
+
+            audit_channel = discord.utils.get(interaction.guild.text_channels, name="audit-log")
+            if audit_channel:
+                await audit_channel.send(
+                    f"📦 **Campaign Archived**: C#{self.campaign_id} archived by {interaction.user.mention}."
+                )
+
+            await interaction.followup.send(f"Campaign C#{self.campaign_id} archived.", ephemeral=True)
+        except Exception as e:
+            print(f"ERROR: Archive campaign action failed for C#{self.campaign_id}: {e}")
+            await interaction.followup.send("An error occurred while archiving the campaign.", ephemeral=True)
+
+    async def view_summary_callback(self, interaction: discord.Interaction):
+        if not await self._user_has_permission(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            embed = await _generate_campaign_completion_summary(self.campaign_id)
+            if not embed:
+                await interaction.followup.send("Could not generate campaign summary.", ephemeral=True)
+                return
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            print(f"ERROR: View summary action failed for C#{self.campaign_id}: {e}")
+            await interaction.followup.send("An error occurred while generating the summary.", ephemeral=True)
 
