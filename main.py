@@ -1462,7 +1462,20 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
         inline=True
     )
 
-    # Section 7: Copeland Method
+    # Section 7: Condorcet Method
+    embed.add_field(
+        name="🤝 Condorcet Method (Pairwise Majority)",
+        value=(
+            "**How it works:** Every option is matched head-to-head against each other. If one option beats all others in these pairwise contests, it wins.\n"
+            "**Analogy:** A round-robin tournament where the champion defeats every other team.\n"
+            "**Pros:** Honors majority preference in each matchup; selects broadly acceptable winners.\n"
+            "**Cons:** Can produce cycles with no clear winner; computation and explanation are more complex."
+        ),
+        inline=True
+    )
+
+    # Section 8: Copeland Method
+
     embed.add_field(
         name="⚔️ Copeland Method (Pairwise Champion)",
         value=(
@@ -1476,8 +1489,8 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
 
     # Make sure the next fields are not inline to take full width
     # Add an empty field if the number of inline fields is odd, to prevent the next non-inline field from appearing next to the last inline one.
-    # Current inline fields = 5 (Plurality, Borda, Approval, Runoff, Copeland) - which is odd, so add an empty field.
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
+    # Current inline fields = 6 (Plurality, Borda, Approval, Runoff, Condorcet, Copeland) - which is even. So no empty field needed.
+
 
     # Section 8: How to Use Bot Commands
     embed.add_field(
