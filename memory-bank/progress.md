@@ -36,7 +36,8 @@
     *   `format_vote_results` displays weighted results.
 *   **Automated Server Guide Channel (`main.py`, `utils.py`):
     *   A `#server-guide` channel is automatically created when the bot joins a server or on startup for existing servers.
-    *   This channel is populated with a single, comprehensive embed message explaining server channels, detailed explanations of available voting protocols (Plurality, Borda, Approval, Runoff, Copeland), and basic bot command usage.
+    *   This channel is populated with a single, comprehensive embed message explaining server channels, detailed explanations of available voting protocols (Plurality, Borda, Approval, Runoff, Condorcet, Copeland), and basic bot command usage.
+
     *   The channel is read-only for users, and the bot purges its previous guide message before sending a new one to keep it clean.
 
 ## What's Left to Build / Verify Thoroughly
