@@ -7,6 +7,7 @@ To develop a Discord bot that automates governance processes within a Discord se
 ## Key Features
 
 *   **Customizable Proposal Creation:** Allow users to create proposals with different voting mechanisms (e.g., Plurality, Borda Count, Approval Voting, Runoff, Condorcet).
+
 *   **Weighted Campaigns:** Allow creation of multi-scenario campaigns where users invest tokens to weight their votes in each scenario.
 *   **Hyperparameter Configuration:** Enable configuration of model-specific hyperparameters for each proposal (e.g., custom winning thresholds, allowance of abstain votes).
 *   **Dynamic Form Generation:** Implement a user-friendly way to present form fields dynamically based on selected voting models, overcoming Discord API limitations.
