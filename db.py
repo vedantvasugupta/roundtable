@@ -1984,6 +1984,20 @@ async def get_proposal_scenario_order(proposal_id: int) -> Optional[int]:
         row = await cursor.fetchone()
         return row[0] if row and row[0] is not None else None
 
+async def get_campaign_participants(campaign_id: int) -> List[Dict[str, Any]]:
+    """Retrieve all participation entries for a given campaign."""
+    try:
+        async with get_db() as conn:
+            cursor = await conn.execute(
+                "SELECT * FROM user_campaign_participation WHERE campaign_id = ?",
+                (campaign_id,),
+            )
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        print(f"ERROR: Could not fetch participants for campaign {campaign_id}: {e}")
+        return []
+
 async def get_enrolled_voter_ids_for_campaign(campaign_id: int) -> List[int]:
     """Retrieve a list of user IDs enrolled in a specific campaign."""
     async with get_db() as conn:
