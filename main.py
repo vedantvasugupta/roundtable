@@ -325,7 +325,7 @@ async def set_setting(ctx, key: str, value: str):
         "admission_method": ["admin", "vote", "anyone"],
         "removal_method": ["admin", "some_roles", "vote", "anyone"],
         "immutable_rule_change_method": ["3-step", "harder_majority"],
-        "default_voting_protocol": ["plurality", "borda", "approval", "copeland", "runoff", "dhondt"]
+        "default_voting_protocol": ["plurality", "borda", "approval", "copeland", "runoff", "condorcet"]
     }
 
     # Check if the key might be a constitutional variable instead of a setting
@@ -458,8 +458,8 @@ async def vote(ctx, proposal_id: int, *args):
     """Cast a vote on a proposal.
 
     Usage depends on the voting mechanism:
-    - Plurality/D'Hondt: !vote <proposal_id> <option>
-    - Borda/Runoff: !vote <proposal_id> rank option1,option2,option3,...
+    - Plurality: !vote <proposal_id> <option>
+    - Borda/Runoff/Condorcet: !vote <proposal_id> rank option1,option2,option3,...
     - Approval: !vote <proposal_id> approve option1,option2,...
     """
     # Delete the command message for privacy
@@ -502,11 +502,11 @@ async def vote(ctx, proposal_id: int, *args):
     voting_mechanism = proposal['voting_mechanism'].lower()
 
     vote_data = {}
-    if voting_mechanism in ["plurality", "dhondt"]:
+    if voting_mechanism == "plurality":
         # Single option vote
         vote_data = {"option": args[0]}
 
-    elif voting_mechanism in ["borda", "runoff"]:
+    elif voting_mechanism in ["borda", "runoff", "condorcet"]:
         # Ranked vote
         if len(args) < 2 or args[0].lower() != "rank":
             await ctx.send("❌ For ranked voting, use: `!vote <proposal_id> rank option1,option2,option3,...`")
@@ -925,7 +925,7 @@ async def see_settings(ctx, category: str = None):
         },
         "default_voting_protocol": {
             "description": "Sets the default voting mechanism for proposals",
-            "values": ["plurality", "borda", "approval", "copeland", "runoff", "dhondt"],
+            "values": ["plurality", "borda", "approval", "copeland", "runoff", "condorcet"],
             "example": "!set_setting default_voting_protocol plurality",
             "current": None
         }
@@ -1313,8 +1313,8 @@ async def help_guide(ctx):
     embed.add_field(
         name="🗳️ Voting",
         value=(
-            "• `!vote <proposal_id> <option>` - Vote on a plurality/D'Hondt proposal\n"
-            "• `!vote <proposal_id> rank option1,option2,...` - Vote on a Borda/Runoff proposal\n"
+            "• `!vote <proposal_id> <option>` - Vote on a plurality proposal\n"
+            "• `!vote <proposal_id> rank option1,option2,...` - Vote on a Borda/Runoff/Condorcet proposal\n"
             "• `!vote <proposal_id> approve option1,option2,...` - Vote on an approval proposal\n"
             "Note: Voting is best done via DM for privacy"
         ),
@@ -1462,19 +1462,7 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
         inline=True
     )
 
-    # Section 7: D'Hondt Method
-    embed.add_field(
-        name="📊 D'Hondt Method (Proportional Allocation)",
-        value=(
-            "**How it works:** Often for proportional seat allocation. Uses highest averages (votes divided by 1, 2, 3...). For single-winner, adapts this.\n"
-            "**Analogy:** Allocating parliament seats – larger parties get more, smaller ones still have a chance.\n"
-            "**Pros:** Proportional for multiple seats; adaptable for single-winner.\n"
-            "**Cons:** Complex; single-winner behavior might resemble plurality but with harder math."
-        ),
-        inline=True
-    )
-
-    # Section 8: Copeland Method
+    # Section 7: Copeland Method
     embed.add_field(
         name="⚔️ Copeland Method (Pairwise Champion)",
         value=(
@@ -1488,9 +1476,10 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
 
     # Make sure the next fields are not inline to take full width
     # Add an empty field if the number of inline fields is odd, to prevent the next non-inline field from appearing next to the last inline one.
-    # Current inline fields = 6 (Plurality, Borda, Approval, Runoff, D'Hondt, Copeland) - which is even. So no empty field needed.
+    # Current inline fields = 5 (Plurality, Borda, Approval, Runoff, Copeland) - which is odd, so add an empty field.
+    embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-    # Section 9: How to Use Bot Commands
+    # Section 8: How to Use Bot Commands
     embed.add_field(
         name="🤖 Using Bot Commands",
         value=(
@@ -1504,7 +1493,7 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
         inline=False
     )
 
-    # Section 10: Getting Help
+    # Section 9: Getting Help
     embed.add_field(
         name="❓ Getting Help",
         value="If you have questions about the server, governance, or the bot, please ask in `#general`. Server administrators are also available to assist you.",
