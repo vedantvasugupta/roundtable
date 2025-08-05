@@ -1722,3 +1722,74 @@ async def send_batched_campaign_dms(guild: discord.Guild, campaign_id: int, scen
 #     return members
 
 # Ensure other functions like format_vote_results, check_expired_proposals, etc. are below this
+
+class CampaignCompletionView(discord.ui.View):
+    """Simple view shown when a campaign has fully concluded."""
+    def __init__(self, campaign_id: int, bot_instance: commands.Bot):
+        super().__init__(timeout=None)
+        self.campaign_id = campaign_id
+        self.bot = bot_instance
+        # Placeholder button for future functionality (e.g., archiving)
+        archive_button = discord.ui.Button(
+            label="Archive Campaign",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"campaign_{campaign_id}_archive",
+            disabled=True
+        )
+        self.add_item(archive_button)
+
+async def update_campaign_completion_message(guild: discord.Guild, campaign_id: int, bot_instance: commands.Bot) -> bool:
+    """Update the campaign control message to reflect completion.
+
+    Fetches the campaign's control_message_id, then edits the control panel
+    message with a completion-themed embed and the CampaignCompletionView.
+    Returns True if the message was edited successfully.
+    """
+    try:
+        campaign_data = await db.get_campaign(campaign_id)
+        if not campaign_data:
+            print(f"WARN: Campaign C#{campaign_id} not found for completion update")
+            return False
+
+        control_message_id = campaign_data.get('control_message_id')
+        if not control_message_id:
+            print(f"WARN: No control_message_id stored for C#{campaign_id}")
+            return False
+
+        channel_name = CHANNELS.get("campaign_management", "campaign-management")
+        campaign_channel = discord.utils.get(guild.text_channels, name=channel_name)
+        if not campaign_channel:
+            print(f"WARN: Campaign management channel '{channel_name}' not found in guild {guild.id}")
+            return False
+
+        try:
+            control_message = await campaign_channel.fetch_message(control_message_id)
+        except discord.NotFound:
+            print(f"WARN: Control message {control_message_id} for C#{campaign_id} not found")
+            return False
+        except discord.HTTPException as e:
+            print(f"ERROR fetching control message {control_message_id} for C#{campaign_id}: {e}")
+            return False
+
+        completion_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        embed = discord.Embed(
+            title=f"🏁 Campaign Completed: '{campaign_data.get('title', 'Untitled')}'",
+            description=(
+                f"All scenarios for this campaign have been processed.\n"
+                f"Completed: {completion_time} UTC"
+            ),
+            color=discord.Color.gold()
+        )
+        embed.add_field(
+            name="Next Steps",
+            value="Review the results and consider archiving the campaign.",
+            inline=False
+        )
+        embed.set_footer(text=f"Campaign ID: C#{campaign_id}")
+
+        completion_view = CampaignCompletionView(campaign_id, bot_instance)
+        await control_message.edit(embed=embed, view=completion_view)
+        return True
+    except Exception as e:
+        print(f"ERROR updating completion message for C#{campaign_id}: {e}")
+        return False
