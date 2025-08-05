@@ -1263,10 +1263,10 @@ def get_voting_instructions(mechanism, options):
     options_text = ", ".join(
         [f"`{opt}`" for opt in options]) if options else "No options defined."
 
-    if mechanism in ["plurality", "dhondt"]:
+    if mechanism == "plurality":
         instructions += f"Format: `!vote <proposal_id> <option>`\nChoose *one* option.\nAvailable options: {options_text}"
 
-    elif mechanism in ["borda", "runoff"]:
+    elif mechanism in ["borda", "runoff", "condorcet"]:
         instructions += f"Format: `!vote <proposal_id> rank option1,option2,...`\nRank the options in order of preference, separated by commas.\nAvailable options: {options_text}"
 
     elif mechanism == "approval":
