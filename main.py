@@ -502,7 +502,7 @@ async def vote(ctx, proposal_id: int, *args):
     voting_mechanism = proposal['voting_mechanism'].lower()
 
     vote_data = {}
-    if voting_mechanism in ["plurality", "dhondt"]:
+    if voting_mechanism == "plurality":
         # Single option vote
         vote_data = {"option": args[0]}
 
@@ -1475,6 +1475,7 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
     )
 
     # Section 8: Copeland Method
+
     embed.add_field(
         name="⚔️ Copeland Method (Pairwise Champion)",
         value=(
@@ -1490,7 +1491,8 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
     # Add an empty field if the number of inline fields is odd, to prevent the next non-inline field from appearing next to the last inline one.
     # Current inline fields = 6 (Plurality, Borda, Approval, Runoff, Condorcet, Copeland) - which is even. So no empty field needed.
 
-    # Section 9: How to Use Bot Commands
+
+    # Section 8: How to Use Bot Commands
     embed.add_field(
         name="🤖 Using Bot Commands",
         value=(
@@ -1504,7 +1506,7 @@ async def create_and_send_server_guide(guild: discord.Guild, bot_instance: comma
         inline=False
     )
 
-    # Section 10: Getting Help
+    # Section 9: Getting Help
     embed.add_field(
         name="❓ Getting Help",
         value="If you have questions about the server, governance, or the bot, please ask in `#general`. Server administrators are also available to assist you.",
