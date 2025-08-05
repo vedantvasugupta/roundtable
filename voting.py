@@ -878,8 +878,6 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
             vote_view = RankedVoteView(**view_args) # Add specific hyperparams if needed by RankedVoteView
         elif mechanism == 'approval':
             vote_view = ApprovalVoteView(**view_args)
-        # elif mechanism == 'dhondt': # D'Hondt might need a more complex view or be informational
-        #     vote_view = DHondtVoteView(**view_args) # Example, if such a view exists
         else:
             # Fallback or error for unsupported mechanisms in DM voting
             print(f"Warning: Unsupported mechanism '{mechanism}' for DM voting view for Proposal #{proposal_id}. Defaulting to Plurality-like.")

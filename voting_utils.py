@@ -1233,6 +1233,7 @@ def get_voting_instructions(mechanism, options):
         [f"`{opt}`" for opt in options]) if options else "No options defined."
 
     if mechanism in ["plurality"]:
+
         instructions += f"Format: `!vote <proposal_id> <option>`\nChoose *one* option.\nAvailable options: {options_text}"
 
     elif mechanism in ["borda", "runoff", "condorcet"]:
