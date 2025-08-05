@@ -328,7 +328,7 @@ class ProposalMechanismSelectionView(discord.ui.View):
             ("Borda Count", "borda", "📊"),
             ("Approval Voting", "approval", "👍"),
             ("Runoff Voting", "runoff", "🔄"),
-            ("D'Hondt Method", "dhondt", "⚖️"),
+            ("Condorcet Method", "condorcet", "⚔️"),
         ]
 
         # Add Weighted Campaign creation button ONLY if not already in a campaign definition flow
@@ -405,8 +405,8 @@ class ProposalMechanismSelectionView(discord.ui.View):
             modal = ApprovalProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
         elif mechanism_name == "runoff":
             modal = RunoffProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
-        elif mechanism_name == "dhondt":
-            modal = DHondtProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
+        elif mechanism_name == "condorcet":
+            modal = CondorcetProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
 
         if modal:
             await interaction.response.send_modal(modal)
@@ -673,8 +673,8 @@ class RunoffProposalModal(BaseProposalModal):
             print(f"Error in RunoffProposalModal on_submit: {e}")
             traceback.print_exc()
             await interaction.followup.send("An error occurred in the Runoff submission.", ephemeral=True)
-
-class DHondtProposalModal(BaseProposalModal):
+ 
+class CondorcetProposalModal(BaseProposalModal):
     def __init__(self, interaction: discord.Interaction, mechanism_name: str, campaign_id: Optional[int] = None, scenario_order: Optional[int] = None, title_prefix: str = "New"):
         super().__init__(interaction, mechanism_name, title_prefix=title_prefix, campaign_id=campaign_id, scenario_order=scenario_order)
         self.allow_abstain_input = discord.ui.TextInput(
@@ -684,13 +684,6 @@ class DHondtProposalModal(BaseProposalModal):
             max_length=3
         )
         self.add_item(self.allow_abstain_input)
-
-        self.num_seats_input = discord.ui.TextInput(
-            label="Number of 'Seats' to Allocate (Winners)",
-            default="1",
-            required=False
-        )
-        self.add_item(self.num_seats_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -705,26 +698,11 @@ class DHondtProposalModal(BaseProposalModal):
                 await interaction.followup.send("Invalid input for 'Allow Abstain'. Please use 'yes' or 'no'.", ephemeral=True)
                 return
 
-            num_seats_str = self.num_seats_input.value.strip()
-            if num_seats_str:
-                try:
-                    num_seats = int(num_seats_str)
-                    if num_seats <= 0:
-                        await interaction.response.send_message("Number of seats must be a positive integer.", ephemeral=True)
-                        return
-                    hyperparameters["num_seats"] = num_seats
-                except ValueError:
-                    await interaction.response.send_message("Invalid input for number of seats. Please enter a whole number (e.g., 3).", ephemeral=True)
-                    return
-            else:
-                # Default to 1 seat if not specified, as per the input's default value
-                hyperparameters["num_seats"] = 1
-
             await self.common_on_submit(interaction, hyperparameters)
         except Exception as e:
-            print(f"Error in DHondtProposalModal on_submit: {e}")
+            print(f"Error in CondorcetProposalModal on_submit: {e}")
             traceback.print_exc()
-            await interaction.followup.send("An error occurred in the D'Hondt submission.", ephemeral=True)
+            await interaction.followup.send("An error occurred in the Condorcet submission.", ephemeral=True)
 
 # Helper function to be called by BaseProposalModal (Now _create_new_proposal_entry)
 async def _create_new_proposal_entry(interaction: discord.Interaction, title: str, description: str, mechanism_name: str, options: List[str], deadline_db_str: str, hyperparameters: Optional[Dict[str, Any]] = None, campaign_id: Optional[int] = None, scenario_order: Optional[int] = None) -> Optional[int]:
