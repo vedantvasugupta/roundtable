@@ -693,15 +693,18 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
         embed.add_field(name="Total Weighted Ballot Power", value=str(results.get('total_weighted_ballot_power', 0)), inline=True)
         embed.add_field(name="Round Details", value="\n".join([f"**Round {round_num}**\n" + round_text for round_num, round_text in enumerate(results['rounds_detailed'], 1)]), inline=False)
     elif mechanism == 'condorcet':
-        embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
-        embed.add_field(name="Total Weighted Ballot Power", value=str(results.get('total_weighted_ballot_power', 0)), inline=True)
-        pairwise = results.get('pairwise_matrix', {})
-        lines = []
-        for option, opponents in pairwise.items():
-            opp_text = ", ".join([f"{opp}: {count}" for opp, count in opponents.items()])
-            lines.append(f"{option}: {opp_text}")
-        if lines:
-            embed.add_field(name="Pairwise Comparisons", value="\n".join(lines), inline=False)
+        pairwise_matrix = results.get('pairwise_results', {}) or results.get('pairwise_matrix', {})
+        pairwise_lines = []
+        for option, opponents in pairwise_matrix.items():
+            matchups = ", ".join([f"{opp}:{res}" for opp, res in opponents.items()])
+            pairwise_lines.append(f"{option} -> {matchups}")
+        pairwise_text = "\n".join(pairwise_lines) if pairwise_lines else "No pairwise data available"
+        embed.add_field(name="Pairwise Matchups", value=pairwise_text, inline=False)
+        if results.get('condorcet_winner'):
+            embed.add_field(name="Condorcet Verdict", value=f"Winner: {results['condorcet_winner']}", inline=True)
+        else:
+            embed.add_field(name="Condorcet Verdict", value="No Condorcet winner (cycle detected)", inline=True)
+
 
     # Add footer
     embed.set_footer(text=f"Results for Proposal #{proposal_id} | Calculated at {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
