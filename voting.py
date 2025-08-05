@@ -28,10 +28,12 @@ import utils  # Import the module to access its functions
 
 # ... (ensure all necessary imports are at the top, including db, voting_utils, utils, discord) ...
 
+
 async def process_vote(user_id: int, proposal_id: int, vote_data_dict: Dict[str, Any], is_abstain: bool, tokens_invested: Optional[int]) -> Tuple[bool, str]:
     """Process and record a vote using db.record_vote."""
     try:
-        print(f"DEBUG: process_vote called for Proposal #{proposal_id} U#{user_id}. Abstain: {is_abstain}, Tokens: {tokens_invested}")
+        print(
+            f"DEBUG: process_vote called for Proposal #{proposal_id} U#{user_id}. Abstain: {is_abstain}, Tokens: {tokens_invested}")
         # Basic proposal and status checks (can be expanded)
         proposal = await db.get_proposal(proposal_id)
         if not proposal:
@@ -44,24 +46,28 @@ async def process_vote(user_id: int, proposal_id: int, vote_data_dict: Dict[str,
         if deadline_data:
             try:
                 # Assuming deadline_data is an ISO format string from the database
-                deadline_dt = datetime.fromisoformat(deadline_data.replace('Z', '+00:00')) if 'Z' in deadline_data else datetime.fromisoformat(deadline_data)
+                deadline_dt = datetime.fromisoformat(deadline_data.replace(
+                    'Z', '+00:00')) if 'Z' in deadline_data else datetime.fromisoformat(deadline_data)
                 # Ensure deadline_dt is timezone-aware for comparison with timezone-aware datetime.now()
                 if deadline_dt.tzinfo is None or deadline_dt.tzinfo.utcoffset(deadline_dt) is None:
-                    deadline_dt = deadline_dt.replace(tzinfo=timezone.utc) # Assume UTC if naive
+                    deadline_dt = deadline_dt.replace(
+                        tzinfo=timezone.utc)  # Assume UTC if naive
 
                 if datetime.now(timezone.utc) > deadline_dt:
                     return False, "Voting has ended for this proposal."
             except ValueError:
-                print(f"ERROR: Could not parse deadline string '{deadline_data}' in process_vote for Proposal #{proposal_id}")
+                print(
+                    f"ERROR: Could not parse deadline string '{deadline_data}' in process_vote for Proposal #{proposal_id}")
                 # Decide handling: either let vote proceed or return error
                 # return False, "Error processing proposal deadline."
-                pass # Or let it proceed if parsing fails, though this might be too lenient
+                pass  # Or let it proceed if parsing fails, though this might be too lenient
 
         const_vars = await db.get_constitutional_variables(proposal['server_id'])
         privacy = const_vars.get('vote_privacy', {}).get('value', 'public')
         if privacy == 'anonymous':
             await db.get_or_create_vote_identifier(
-                proposal['server_id'], user_id, proposal_id, proposal.get('campaign_id')
+                proposal['server_id'], user_id, proposal_id, proposal.get(
+                    'campaign_id')
             )
 
         # vote_data_dict is the mechanism-specific data (e.g., {'option': 'A'} or {'rankings': ['A', 'B']})
@@ -71,7 +77,7 @@ async def process_vote(user_id: int, proposal_id: int, vote_data_dict: Dict[str,
         success = await db.record_vote(
             user_id=user_id,
             proposal_id=proposal_id,
-            vote_data=vote_json_str, # This is the mechanism-specific part
+            vote_data=vote_json_str,  # This is the mechanism-specific part
             is_abstain=is_abstain,
             tokens_invested=tokens_invested
         )
@@ -80,20 +86,23 @@ async def process_vote(user_id: int, proposal_id: int, vote_data_dict: Dict[str,
             # Trigger update of the public tracking message asynchronously
             # Ensure proposal object has server_id for fetching guild
             if proposal.get('server_id') and proposal.get('vote_tracking_message_id'):
-                 asyncio.create_task(update_voting_message(proposal)) # Fire and forget
+                asyncio.create_task(update_voting_message(
+                    proposal))  # Fire and forget
             return True, "Vote recorded successfully."
         else:
             return False, "Failed to record vote in the database."
 
     except Exception as e:
-        print(f"CRITICAL ERROR in process_vote for Proposal #{proposal_id} U#{user_id}: {e}")
+        print(
+            f"CRITICAL ERROR in process_vote for Proposal #{proposal_id} U#{user_id}: {e}")
         traceback.print_exc()
         return False, "An internal error occurred while processing your vote."
 
 
 class AbstainButton(discord.ui.Button):
     def __init__(self, proposal_id: int):
-        super().__init__(label="Abstain from Voting", style=discord.ButtonStyle.secondary, custom_id=f"abstain_{proposal_id}_{random.randint(1000, 9999)}")
+        super().__init__(label="Abstain from Voting", style=discord.ButtonStyle.secondary,
+                         custom_id=f"abstain_{proposal_id}_{random.randint(1000, 9999)}")
         self.proposal_id = proposal_id
 
     async def callback(self, interaction: discord.Interaction):
@@ -130,7 +139,8 @@ class TokenInvestmentModal(discord.ui.Modal, title="Invest Tokens"):
             placeholder=f"Enter a number (0-{remaining_tokens})",
             required=True,
             min_length=1,
-            max_length=len(str(remaining_tokens)) if remaining_tokens > 0 else 1
+            max_length=len(str(remaining_tokens)
+                           ) if remaining_tokens > 0 else 1
         )
         self.add_item(self.token_input)
 
@@ -174,14 +184,15 @@ class BaseVoteView(discord.ui.View):
                  allow_abstain: bool = True,
                  campaign_id: Optional[int] = None,
                  campaign_details: Optional[Dict[str, Any]] = None,
-                 user_remaining_tokens: Optional[int] = None): # Added campaign params
+                 user_remaining_tokens: Optional[int] = None):  # Added campaign params
         super().__init__(timeout=86400)  # 24-hour timeout for voting
         self.proposal_id = proposal_id
         self.options = options
-        self.user_id = user_id # The user this DM is intended for
+        self.user_id = user_id  # The user this DM is intended for
         self.is_submitted = False
         self.is_abstain_vote = False
-        self.selected_mechanism_vote_data: Dict[str, Any] = {} # To store mechanism-specific choices before final submission
+        # To store mechanism-specific choices before final submission
+        self.selected_mechanism_vote_data: Dict[str, Any] = {}
 
         self.campaign_id = campaign_id
         self.campaign_details = campaign_details
@@ -197,7 +208,8 @@ class BaseVoteView(discord.ui.View):
         # Each item's callback should:
         # 1. Perform its specific logic (e.g., record the selected option).
         # 2. Call self.submit_vote_callback(interaction) to proceed.
-        raise NotImplementedError("Subclasses must implement add_mechanism_items")
+        raise NotImplementedError(
+            "Subclasses must implement add_mechanism_items")
 
     def has_selection(self) -> bool:
         # Subclasses should implement this to check if a valid vote selection has been made
@@ -231,21 +243,23 @@ class BaseVoteView(discord.ui.View):
                 await interaction.followup.send("Please make a selection before submitting.", ephemeral=True)
             return
 
-        if self.is_abstain_vote: # Handled by AbstainButton's callback directly calling finalize_vote
+        if self.is_abstain_vote:  # Handled by AbstainButton's callback directly calling finalize_vote
             # This path should ideally not be hit if AbstainButton calls finalize_vote directly after deferring.
-            print(f"DEBUG: BaseVoteView.submit_vote_callback reached for abstain vote for Proposal #{self.proposal_id}. This should be rare.")
+            print(
+                f"DEBUG: BaseVoteView.submit_vote_callback reached for abstain vote for Proposal #{self.proposal_id}. This should be rare.")
             # Ensure interaction is acknowledged if not already (AbstainButton should have deferred)
             if not interaction.response.is_done():
                 await interaction.response.defer(ephemeral=True, thinking=True)
             await self.finalize_vote(interaction, tokens_invested_this_scenario=0 if self.campaign_id else None)
-        elif self.campaign_id is not None and self.user_remaining_tokens is not None: # Check initial view token count
+        elif self.campaign_id is not None and self.user_remaining_tokens is not None:  # Check initial view token count
             # Fetch fresh tokens from DB for accuracy before showing modal or auto-investing 0
             fresh_user_remaining_tokens = await db.get_user_remaining_tokens(self.campaign_id, self.user_id)
             if fresh_user_remaining_tokens is None:
                 # This case means the user might not be enrolled or DB error.
                 # self.user_remaining_tokens might be from view init, could be stale or from initial enrollment.
                 # Defaulting to 0 if DB fetch fails to prevent locking up or allowing investment.
-                print(f"WARNING: Failed to fetch fresh tokens for U#{self.user_id} C#{self.campaign_id} in submit_vote_callback. Using 0.")
+                print(
+                    f"WARNING: Failed to fetch fresh tokens for U#{self.user_id} C#{self.campaign_id} in submit_vote_callback. Using 0.")
                 fresh_user_remaining_tokens = 0
                 # Send an error message and stop further processing for this vote path.
                 if not interaction.response.is_done():
@@ -254,8 +268,7 @@ class BaseVoteView(discord.ui.View):
                     await interaction.followup.send("Error: Could not verify your current token balance. Please try again later.", ephemeral=True)
                 return
 
-
-            if fresh_user_remaining_tokens == 0: # No tokens left, auto-invest 0
+            if fresh_user_remaining_tokens == 0:  # No tokens left, auto-invest 0
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True, thinking=True)
                 await self.finalize_vote(interaction, tokens_invested_this_scenario=0)
@@ -263,16 +276,19 @@ class BaseVoteView(discord.ui.View):
                 # It's a campaign vote with tokens, present the token investment modal.
                 # This will be the first response to the interaction.
                 try:
-                    token_modal = TokenInvestmentModal(base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
+                    token_modal = TokenInvestmentModal(
+                        base_vote_view=self, remaining_tokens=fresh_user_remaining_tokens)
                     await interaction.response.send_modal(token_modal)
                 except discord.errors.InteractionResponded:
-                    print(f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
+                    print(
+                        f"WARNING: Interaction already responded to when trying to send modal for P#{self.proposal_id} U#{self.user_id}.")
                     await interaction.followup.send("An error occurred while trying to process your selection. Please try again.", ephemeral=True)
                 except Exception as e:
-                    print(f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
+                    print(
+                        f"ERROR: Unexpected error sending modal for P#{self.proposal_id} U#{self.user_id}: {e}")
                     traceback.print_exc()
                     if not interaction.response.is_done():
-                         await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
+                        await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
                     else:
                         await interaction.followup.send("An unexpected error occurred. Please try again.", ephemeral=True)
 
@@ -286,12 +302,13 @@ class BaseVoteView(discord.ui.View):
         """
         Finalizes the vote recording process after all selections (including tokens) are made.
         """
-        if self.is_submitted: # Should have been caught by submit_vote_callback or modal prevented re-submission
+        if self.is_submitted:  # Should have been caught by submit_vote_callback or modal prevented re-submission
             # Ensure interaction is acknowledged if not already done.
             if not interaction.response.is_done():
                 try:
                     await interaction.response.send_message("You have already submitted your vote for this proposal.", ephemeral=True)
-                except discord.InteractionResponded: # Can happen if a quick double click leads here twice.
+                # Can happen if a quick double click leads here twice.
+                except discord.InteractionResponded:
                     await interaction.followup.send("You have already submitted your vote for this proposal.", ephemeral=True)
             else:
                 await interaction.followup.send("You have already submitted your vote for this proposal.", ephemeral=True)
@@ -302,22 +319,26 @@ class BaseVoteView(discord.ui.View):
         # Modal on_submit defers the interaction before calling this.
         # Button callbacks (Plurality option_callback, AbstainButton callback) should defer before calling this path.
         if not interaction.response.is_done():
-            print(f"WARNING: finalize_vote called with interaction not yet responded/deferred. P#{self.proposal_id}. Forcing defer.")
+            print(
+                f"WARNING: finalize_vote called with interaction not yet responded/deferred. P#{self.proposal_id}. Forcing defer.")
             try:
                 await interaction.response.defer(ephemeral=True, thinking=True)
             except discord.InteractionResponded:
-                pass # Already responded, which is unexpected here but we'll proceed.
-
+                # Already responded, which is unexpected here but we'll proceed.
+                pass
 
         # Determine vote data based on whether it's an abstain vote
         if self.is_abstain_vote:
-            actual_vote_data = {"choice": "abstain"} # Standardized abstain data
+            # Standardized abstain data
+            actual_vote_data = {"choice": "abstain"}
         else:
-            actual_vote_data = self.get_mechanism_vote_data() # Get from subclass (Plurality, Ranked, etc.)
+            # Get from subclass (Plurality, Ranked, etc.)
+            actual_vote_data = self.get_mechanism_vote_data()
 
         # Safety check for empty vote data if not abstaining
         if not self.is_abstain_vote and not actual_vote_data:
-            print(f"ERROR: finalize_vote called for non-abstain vote but get_mechanism_vote_data() returned empty. P#{self.proposal_id} U#{self.user_id}")
+            print(
+                f"ERROR: finalize_vote called for non-abstain vote but get_mechanism_vote_data() returned empty. P#{self.proposal_id} U#{self.user_id}")
             # Attempt to respond to the interaction to prevent hanging.
             await interaction.edit_original_response(content="❌ Error: Your selection was not recognized. Please try again.", view=None)
             return
@@ -331,7 +352,7 @@ class BaseVoteView(discord.ui.View):
             # Re-fetch current tokens for atomicity BEFORE recording the vote.
             current_db_tokens = await db.get_user_remaining_tokens(self.campaign_id, self.user_id)
 
-            if current_db_tokens is None: # User not enrolled or error
+            if current_db_tokens is None:  # User not enrolled or error
                 message = "❌ Error: Could not verify your token balance for the campaign."
             elif tokens_invested_this_scenario > current_db_tokens:
                 message = f"❌ Error: You tried to invest {tokens_invested_this_scenario} tokens, but you only have {current_db_tokens} left."
@@ -352,9 +373,10 @@ class BaseVoteView(discord.ui.View):
                 else:
                     # Vote recorded, but token update failed. This is a critical state.
                     message = f"⚠️ Your vote for P#{self.proposal_id} was recorded, but updating your token balance failed. Please contact an admin."
-                    print(f"CRITICAL: Vote recorded for P#{self.proposal_id} U#{self.user_id} but token update failed for C#{self.campaign_id}.")
+                    print(
+                        f"CRITICAL: Vote recorded for P#{self.proposal_id} U#{self.user_id} but token update failed for C#{self.campaign_id}.")
                     # Consider if the vote should be reversed or flagged. For now, alert user.
-                    success = False # Mark as overall failure for UI purposes.
+                    success = False  # Mark as overall failure for UI purposes.
         else:
             # Non-campaign vote
             success, message = await process_vote(
@@ -362,53 +384,60 @@ class BaseVoteView(discord.ui.View):
             )
             message = f"✅ Vote recorded for P#{self.proposal_id}." if success else f"❌ {message}"
 
-
         # --- Unified Message Content & View Update ---
-        final_content = message # This will be used for the interaction response.
+        # This will be used for the interaction response.
+        final_content = message
 
         self.is_submitted = True  # Mark as submitted
-        for item_child in self.children: # Use different var name to avoid conflict
+        for item_child in self.children:  # Use different var name to avoid conflict
             if isinstance(item_child, (discord.ui.Button, discord.ui.Select)):
                 item_child.disabled = True
         # Ensure the view reflects the selection for Plurality if it's not abstain
         if isinstance(self, PluralityVoteView) and not self.is_abstain_vote and self.selected_option:
-             for item_child in self.children:
+            for item_child in self.children:
                 if isinstance(item_child, discord.ui.Button) and item_child.label == self.selected_option:
                     item_child.style = discord.ButtonStyle.primary
                 elif isinstance(item_child, discord.ui.Button) and item_child.custom_id and item_child.custom_id.startswith(f"plurality_option_{self.proposal_id}_"):
                     item_child.style = discord.ButtonStyle.secondary
-
 
         # --- Unified Interaction Response ---
         try:
             # This is the primary way to respond to an interaction that was deferred (especially with thinking=True).
             # It edits the original message from which the interaction (button click, modal submit) originated.
             await interaction.edit_original_response(content=final_content, view=self)
-            print(f"DEBUG: finalize_vote successfully edited original response for P#{self.proposal_id} U#{self.user_id}. Campaign: {self.campaign_id is not None}. Abstain: {self.is_abstain_vote}")
+            print(
+                f"DEBUG: finalize_vote successfully edited original response for P#{self.proposal_id} U#{self.user_id}. Campaign: {self.campaign_id is not None}. Abstain: {self.is_abstain_vote}")
 
         except discord.NotFound:
-            print(f"NotFound error in finalize_vote for P#{self.proposal_id} U#{self.user_id}. Original message likely deleted.")
+            print(
+                f"NotFound error in finalize_vote for P#{self.proposal_id} U#{self.user_id}. Original message likely deleted.")
             # As a fallback, try sending a new ephemeral message if the original is gone.
             try:
                 await interaction.followup.send(content=final_content, ephemeral=True)
             except Exception as followup_err:
-                print(f"Failed to send followup after NotFound in finalize_vote: {followup_err}")
+                print(
+                    f"Failed to send followup after NotFound in finalize_vote: {followup_err}")
         except discord.HTTPException as e:
-            print(f"HTTPException in finalize_vote responding for P#{self.proposal_id} U#{self.user_id}: {e}")
+            print(
+                f"HTTPException in finalize_vote responding for P#{self.proposal_id} U#{self.user_id}: {e}")
             traceback.print_exc()
             # Fallback for other HTTP errors
             try:
                 await interaction.followup.send(content=f"There was an issue updating the message, but: {final_content}", ephemeral=True)
             except Exception as final_followup_err:
-                print(f"Failed to send final followup after HTTPException in finalize_vote: {final_followup_err}")
+                print(
+                    f"Failed to send final followup after HTTPException in finalize_vote: {final_followup_err}")
 
         # If the vote was successful and it's a non-campaign proposal, or if tracking is generally desired,
         # queue an update for the public tracking message.
         if success and self.proposal_id:
-            proposal_data = await db.get_proposal(self.proposal_id) # Re-fetch proposal for server_id
-            if proposal_data and proposal_data.get('server_id'): # and proposal_data.get('vote_tracking_message_id'): # Tracking msg ID might not exist yet
+            # Re-fetch proposal for server_id
+            proposal_data = await db.get_proposal(self.proposal_id)
+            # and proposal_data.get('vote_tracking_message_id'): # Tracking msg ID might not exist yet
+            if proposal_data and proposal_data.get('server_id'):
                 # The update_vote_tracking in voting_utils handles getting/creating the tracking message.
-                guild = interaction.client.get_guild(proposal_data['server_id'])
+                guild = interaction.client.get_guild(
+                    proposal_data['server_id'])
                 if guild:
                     # Update the queue in main.py instead of direct call
                     if hasattr(interaction.client, 'update_queue'):
@@ -416,20 +445,23 @@ class BaseVoteView(discord.ui.View):
                             'guild_id': guild.id,
                             'proposal_id': self.proposal_id
                         })
-                        print(f"DEBUG: Queued tracker update for P#{self.proposal_id} after vote in finalize_vote.")
+                        print(
+                            f"DEBUG: Queued tracker update for P#{self.proposal_id} after vote in finalize_vote.")
                     else:
-                        print(f"WARNING: Bot has no update_queue. Cannot queue tracker update for P#{self.proposal_id}.")
+                        print(
+                            f"WARNING: Bot has no update_queue. Cannot queue tracker update for P#{self.proposal_id}.")
 
                 else:
-                    print(f"WARNING: Could not get guild {proposal_data['server_id']} for tracker update from finalize_vote.")
-
+                    print(
+                        f"WARNING: Could not get guild {proposal_data['server_id']} for tracker update from finalize_vote.")
 
     def get_mechanism_vote_data(self) -> Dict[str, Any]:
         # This should be overridden by subclasses to return the data specific to their mechanism
         # e.g., for Plurality: return {"option": self.selected_option}
         #      for Ranked: return {"rankings": self.selected_rankings}
         # This data will be JSON serialized and stored in the database.
-        return self.selected_mechanism_vote_data # Relies on subclasses populating this
+        # Relies on subclasses populating this
+        return self.selected_mechanism_vote_data
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         # Check if the interaction user is the one this DM was intended for
@@ -447,18 +479,20 @@ class PluralityVoteView(BaseVoteView):
     """Interactive UI for plurality voting"""
 
     def __init__(self, proposal_id: int, options: List[str], user_id: int, allow_abstain: bool = True, campaign_id: Optional[int] = None, campaign_details: Optional[Dict[str, Any]] = None, user_remaining_tokens: Optional[int] = None):
-        super().__init__(proposal_id, options, user_id, allow_abstain, campaign_id, campaign_details, user_remaining_tokens)
-        self.selected_option: Optional[str] = None # Stores the label of the selected option
+        super().__init__(proposal_id, options, user_id, allow_abstain,
+                         campaign_id, campaign_details, user_remaining_tokens)
+        # Stores the label of the selected option
+        self.selected_option: Optional[str] = None
 
     def add_mechanism_items(self):
         # Add buttons for each option
         for i, option_text in enumerate(self.options):
             button = discord.ui.Button(
                 label=option_text,
-                style=discord.ButtonStyle.secondary, # Initial style
+                style=discord.ButtonStyle.secondary,  # Initial style
                 custom_id=f"plurality_option_{self.proposal_id}_{i}"
             )
-            button.callback = self.option_callback # Assign the callback
+            button.callback = self.option_callback  # Assign the callback
             self.add_item(button)
 
     def has_selection(self) -> bool:
@@ -476,19 +510,20 @@ class PluralityVoteView(BaseVoteView):
         if interaction.response.is_done():
             # If already responded (e.g. by a quick double click that got through initial checks)
             # we can't proceed. Log this and inform user if possible.
-            print(f"WARNING: PluralityVoteView.option_callback called but interaction already responded. P#{self.proposal_id} U#{self.user_id}")
+            print(
+                f"WARNING: PluralityVoteView.option_callback called but interaction already responded. P#{self.proposal_id} U#{self.user_id}")
             # Attempt to send a followup if possible, though it might also fail.
             try:
                 await interaction.followup.send("Your previous action is still processing or an error occurred. Please wait a moment.", ephemeral=True)
-            except: # noqa
-                pass # If followup fails, nothing much more to do here.
+            except:  # noqa
+                pass  # If followup fails, nothing much more to do here.
             return
-
 
         custom_id_parts = interaction.data['custom_id'].split('_')
         option_index = int(custom_id_parts[-1])
         self.selected_option = self.options[option_index]
-        self.selected_mechanism_vote_data = self.get_mechanism_vote_data() # Update based on selection
+        # Update based on selection
+        self.selected_mechanism_vote_data = self.get_mechanism_vote_data()
 
         # Button style updates are now handled in finalize_vote before the edit_original_response,
         # so the view passed to edit_original_response will have the correct styles.
@@ -506,7 +541,7 @@ class RankedVoteView(BaseVoteView):
         # Add the initial select menu (it will be on row 0 by default if no other row 0 items are added first,
         # or if its row is explicitly set to 0)
         self._add_rank_select_menu()
-        
+
         # Add Submit Vote button (initially disabled)
         self.submit_button = discord.ui.Button(
             label="Submit Vote",
@@ -608,16 +643,16 @@ class RankedVoteView(BaseVoteView):
             status = status[:1997] + "..."
 
         await interaction.followup.send(status, ephemeral=True)
-        
+
     async def submit_vote_button_callback(self, interaction: discord.Interaction):
         """Handle the submit vote button click"""
         if not self.has_selection():
             await interaction.response.send_message("Please rank at least one option before submitting.", ephemeral=True)
             return
-            
+
         # Set the mechanism vote data
         self.selected_mechanism_vote_data = self.get_mechanism_vote_data()
-        
+
         # Call the base submit callback which handles token investment logic
         await self.submit_vote_callback(interaction)
 
@@ -645,7 +680,7 @@ class ApprovalVoteView(BaseVoteView):
             )
             button.callback = self.option_callback
             self.add_item(button)
-            
+
         # Add Submit Vote button (initially disabled)
         self.submit_button = discord.ui.Button(
             label="Submit Vote",
@@ -683,7 +718,7 @@ class ApprovalVoteView(BaseVoteView):
                 if 0 <= option_index < len(self.options):
                     original_option = self.options[option_index]
                 else:
-                     raise ValueError("Option index out of bounds")
+                    raise ValueError("Option index out of bounds")
             else:
                 raise ValueError("Invalid custom_id format")
 
@@ -703,7 +738,8 @@ class ApprovalVoteView(BaseVoteView):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
         else:
-            print(f"WARNING: ApprovalVoteView.option_callback interaction already responded. P#{self.proposal_id}")
+            print(
+                f"WARNING: ApprovalVoteView.option_callback interaction already responded. P#{self.proposal_id}")
 
         clicked_button = discord.utils.get(
             self.children, custom_id=button_id)
@@ -718,7 +754,7 @@ class ApprovalVoteView(BaseVoteView):
                 clicked_button.style = discord.ButtonStyle.primary
 
         self.selected_mechanism_vote_data = self.get_mechanism_vote_data()
-        
+
         # Update submit button state
         self._update_submit_button()
 
@@ -726,7 +762,8 @@ class ApprovalVoteView(BaseVoteView):
         try:
             await interaction.edit_original_response(view=self)
         except discord.HTTPException as e:
-            print(f"Error editing message in ApprovalVoteView.option_callback: {e}")
+            print(
+                f"Error editing message in ApprovalVoteView.option_callback: {e}")
 
         # Send ephemeral status update about current selections
         if self._approved_options:
@@ -748,7 +785,8 @@ class ApprovalVoteView(BaseVoteView):
         try:
             await interaction.followup.send(status, ephemeral=True)
         except discord.HTTPException as e:
-            print(f"Error sending followup status in ApprovalVoteView.option_callback: {e}")
+            print(
+                f"Error sending followup status in ApprovalVoteView.option_callback: {e}")
 
         # NOTE: Do NOT call submit_vote_callback here anymore!
         # User must click the Submit Vote button when ready
@@ -758,7 +796,7 @@ class ApprovalVoteView(BaseVoteView):
         if not self.has_selection():
             await interaction.response.send_message("Please select at least one option before submitting.", ephemeral=True)
             return
-            
+
         # Proceed to the general submit callback
         await self.submit_vote_callback(interaction)
 
@@ -769,29 +807,34 @@ class ApprovalVoteView(BaseVoteView):
 # 🔹 CORE VOTING LOGIC & DM HANDLING
 # ========================
 
+
 async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[str]) -> bool:
     """Sends a direct message to a member with voting options for a proposal."""
     try:
         proposal_id = proposal.get('proposal_id')
         if not proposal_id:
-            print(f"ERROR: send_voting_dm: proposal_id missing from proposal data: {proposal}")
+            print(
+                f"ERROR: send_voting_dm: proposal_id missing from proposal data: {proposal}")
             return False
 
         # Determine voting mechanism and instantiate the correct view
         mechanism = proposal.get('voting_mechanism', 'plurality').lower()
         hyperparameters = proposal.get('hyperparameters', {})
-        
+
         # FIX: Ensure hyperparameters is a dict, not a string
         if isinstance(hyperparameters, str):
             try:
-                hyperparameters = json.loads(hyperparameters) if hyperparameters.strip() else {}
+                hyperparameters = json.loads(
+                    hyperparameters) if hyperparameters.strip() else {}
             except json.JSONDecodeError:
-                print(f"WARNING: Failed to parse hyperparameters JSON for P#{proposal_id}: {hyperparameters}")
+                print(
+                    f"WARNING: Failed to parse hyperparameters JSON for P#{proposal_id}: {hyperparameters}")
                 hyperparameters = {}
         elif not isinstance(hyperparameters, dict):
             hyperparameters = {}
-            
-        allow_abstain = hyperparameters.get('allow_abstain', True) if isinstance(hyperparameters, dict) else True
+
+        allow_abstain = hyperparameters.get(
+            'allow_abstain', True) if isinstance(hyperparameters, dict) else True
 
         # Campaign-specific information
         campaign_id = proposal.get('campaign_id')
@@ -807,9 +850,10 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
                 # Enroll voter if not already part of the campaign (idempotent)
                 await db.enroll_voter_in_campaign(campaign_id, member.id, campaign_details['total_tokens_per_voter'])
                 user_remaining_tokens = await db.get_user_remaining_tokens(campaign_id, member.id)
-                if user_remaining_tokens is None: # Should not happen after enroll
+                if user_remaining_tokens is None:  # Should not happen after enroll
                     user_remaining_tokens = campaign_details['total_tokens_per_voter']
-                    print(f"WARN: User {member.id} had no token record for C#{campaign_id} after attempting enrollment. Defaulting to campaign total.")
+                    print(
+                        f"WARN: User {member.id} had no token record for C#{campaign_id} after attempting enrollment. Defaulting to campaign total.")
 
                 embed_content += f"**Campaign:** {campaign_details.get('title', 'N/A')}\n"
                 embed_content += f"**Total Scenarios in Campaign:** {campaign_details.get('num_expected_scenarios', 'N/A')}\n"
@@ -827,7 +871,8 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
                 rules_text += f"  - {key.replace('_', ' ').title()}: {value}\n"
 
         # Ensure options are clearly listed
-        options_text = "\n**Options:**\n" + "\n".join([f"- `{option}`" for option in options]) + "\n"
+        options_text = "\n**Options:**\n" + \
+            "\n".join([f"- `{option}`" for option in options]) + "\n"
 
         embed_content += rules_text
         # Add a separator before options for clarity
@@ -836,7 +881,8 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
 
         deadline_data = proposal.get('deadline')
         if deadline_data:
-            formatted_deadline = format_deadline(deadline_data) # Use existing helper
+            formatted_deadline = format_deadline(
+                deadline_data)  # Use existing helper
             embed_content += f"\n**Deadline:** {formatted_deadline}\n"
         else:
             embed_content += "\n**Deadline:** Not set.\n"
@@ -871,35 +917,45 @@ async def send_voting_dm(member: discord.Member, proposal: Dict, options: List[s
         vote_view: BaseVoteView
         if mechanism == 'plurality':
             vote_view = PluralityVoteView(**view_args)
-        elif mechanism == 'borda' or mechanism == 'runoff':
-            # Assuming RankedVoteView handles both based on a hyperparameter or internal logic if needed,
+        elif mechanism in ['borda', 'runoff', 'condorcet']:
+            # Assuming RankedVoteView handles ranked mechanisms based on a hyperparameter or internal logic if needed,
             # or we might need BordaVoteView and RunoffVoteView subclasses.
             # For now, RankedVoteView is a general placeholder.
-            vote_view = RankedVoteView(**view_args) # Add specific hyperparams if needed by RankedVoteView
+            # Add specific hyperparams if needed by RankedVoteView
+            # Add specific hyperparams if needed by RankedVoteView
+            vote_view = RankedVoteView(**view_args)
         elif mechanism == 'approval':
             vote_view = ApprovalVoteView(**view_args)
         else:
             # Fallback or error for unsupported mechanisms in DM voting
-            print(f"Warning: Unsupported mechanism '{mechanism}' for DM voting view for Proposal #{proposal_id}. Defaulting to Plurality-like.")
-            vote_view = PluralityVoteView(**view_args) # Fallback, or handle error
+            print(
+                f"Warning: Unsupported mechanism '{mechanism}' for DM voting view for Proposal #{proposal_id}. Defaulting to Plurality-like."
+            )
+           # Fallback, or handle error
+            vote_view = PluralityVoteView(**view_args)
 
         # Create embed
-        embed = discord.Embed(description=embed_content, color=discord.Color.blue())
+        embed = discord.Embed(description=embed_content,
+                              color=discord.Color.blue())
 
         # Send DM including identifier embed when applicable
         if identifier_embed:
             await member.send(embeds=[embed, identifier_embed], view=vote_view)
         else:
             await member.send(embed=embed, view=vote_view)
-        print(f"✅ Voting DM sent to {member.name} for proposal #{proposal_id} (Mechanism: {mechanism}, Options: {len(options)}, Allow Abstain: {allow_abstain})")
+        print(
+            f"✅ Voting DM sent to {member.name} for proposal #{proposal_id} (Mechanism: {mechanism}, Options: {len(options)}, Allow Abstain: {allow_abstain})")
         return True
     except discord.Forbidden:
-        print(f"⚠️ Failed to send DM to {member.name} (ID: {member.id}) - DMs likely disabled.")
+        print(
+            f"⚠️ Failed to send DM to {member.name} (ID: {member.id}) - DMs likely disabled.")
         return False
     except Exception as e:
-        print(f"❌ Error sending voting DM to {member.name} for proposal #{proposal.get('proposal_id', 'UNKNOWN')}: {e}")
+        print(
+            f"❌ Error sending voting DM to {member.name} for proposal #{proposal.get('proposal_id', 'UNKNOWN')}: {e}")
         traceback.print_exc()
         return False
+
 
 async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_data: List[Dict[str, Any]]) -> bool:
     """
@@ -917,10 +973,12 @@ async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_d
         True if all DMs were attempted (some may fail individually), False if a major error occurs early.
     """
     if not scenarios_data:
-        print(f"WARN: send_campaign_scenario_dms_to_user called for {member.name} with no scenario data.")
-        return True # No DMs to send, not a failure of this function itself
+        print(
+            f"WARN: send_campaign_scenario_dms_to_user called for {member.name} with no scenario data.")
+        return True  # No DMs to send, not a failure of this function itself
 
-    print(f"INFO: Preparing to send batch of {len(scenarios_data)} scenario DMs to {member.name} for C#{scenarios_data[0].get('campaign_id')}")
+    print(
+        f"INFO: Preparing to send batch of {len(scenarios_data)} scenario DMs to {member.name} for C#{scenarios_data[0].get('campaign_id')}")
 
     # It's important that `send_voting_dm` or a similar specialized function
     # is adapted to take the `user_initial_tokens_for_dm_batch` and pass it correctly
@@ -941,24 +999,28 @@ async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_d
         try:
             proposal_id = proposal.get('proposal_id')
             if not proposal_id:
-                print(f"ERROR: send_campaign_scenario_dms_to_user: proposal_id missing for {member.name}, scenario: {proposal.get('title')}")
+                print(
+                    f"ERROR: send_campaign_scenario_dms_to_user: proposal_id missing for {member.name}, scenario: {proposal.get('title')}")
                 num_failed_sends += 1
                 continue
 
             mechanism = proposal.get('voting_mechanism', 'plurality').lower()
             hyperparameters = proposal.get('hyperparameters', {})
-            
+
             # FIX: Ensure hyperparameters is a dict, not a string
             if isinstance(hyperparameters, str):
                 try:
-                    hyperparameters = json.loads(hyperparameters) if hyperparameters.strip() else {}
+                    hyperparameters = json.loads(
+                        hyperparameters) if hyperparameters.strip() else {}
                 except json.JSONDecodeError:
-                    print(f"WARNING: Failed to parse hyperparameters JSON for P#{proposal_id}: {hyperparameters}")
+                    print(
+                        f"WARNING: Failed to parse hyperparameters JSON for P#{proposal_id}: {hyperparameters}")
                     hyperparameters = {}
             elif not isinstance(hyperparameters, dict):
                 hyperparameters = {}
-                
-            allow_abstain = hyperparameters.get('allow_abstain', True) if isinstance(hyperparameters, dict) else True
+
+            allow_abstain = hyperparameters.get(
+                'allow_abstain', True) if isinstance(hyperparameters, dict) else True
 
             embed_content = f"## 🗳️ Vote Now (Campaign Scenario): {proposal.get('title', 'N/A')}\n"
             embed_content += f"**Campaign:** {campaign_title} (C#{campaign_id})\n"
@@ -972,7 +1034,8 @@ async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_d
                 for key, value in hyperparameters.items():
                     rules_text += f"  - {key.replace('_', ' ').title()}: {value}\n"
 
-            options_text = "\n**Options:**\n" + "\n".join([f"- `{option}`" for option in options]) + "\n"
+            options_text = "\n**Options:**\n" + \
+                "\n".join([f"- `{option}`" for option in options]) + "\n"
             embed_content += rules_text
             embed_content += "\n---\n"
             embed_content += options_text
@@ -990,35 +1053,43 @@ async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_d
                 "user_id": member.id,
                 "allow_abstain": allow_abstain,
                 "campaign_id": campaign_id,
-                "campaign_details": await db.get_campaign(campaign_id), # Potentially pass this in scenario_info if fetched once
-                "user_remaining_tokens": user_tokens_for_this_dm_view # CRITICAL: pass the batch-consistent token count
+                # Potentially pass this in scenario_info if fetched once
+                "campaign_details": await db.get_campaign(campaign_id),
+                # CRITICAL: pass the batch-consistent token count
+                "user_remaining_tokens": user_tokens_for_this_dm_view
             }
 
             vote_view: BaseVoteView
             if mechanism == 'plurality':
                 vote_view = PluralityVoteView(**view_args)
-            elif mechanism == 'borda' or mechanism == 'runoff':
+            elif mechanism in ['borda', 'runoff', 'condorcet']:
                 vote_view = RankedVoteView(**view_args)
             elif mechanism == 'approval':
                 vote_view = ApprovalVoteView(**view_args)
             else:
-                print(f"Warning: Unsupported mechanism '{mechanism}' for DM view for P#{proposal_id}. Defaulting.")
+                print(
+                    f"Warning: Unsupported mechanism '{mechanism}' for DM view for P#{proposal_id}. Defaulting.")
                 vote_view = PluralityVoteView(**view_args)
 
-            embed = discord.Embed(description=embed_content, color=discord.Color.blue())
+            embed = discord.Embed(description=embed_content,
+                                  color=discord.Color.blue())
             await member.send(embed=embed, view=vote_view)
-            print(f"✅ Campaign Scenario DM sent to {member.name} for P#{proposal_id} (C#{campaign_id}, S#{proposal.get('scenario_order')})")
-            num_successful_sends +=1
+            print(
+                f"✅ Campaign Scenario DM sent to {member.name} for P#{proposal_id} (C#{campaign_id}, S#{proposal.get('scenario_order')})")
+            num_successful_sends += 1
 
         except discord.Forbidden:
-            print(f"⚠️ Failed to send Campaign Scenario DM to {member.name} (ID: {member.id}) for P#{proposal.get('proposal_id')} - DMs likely disabled.")
+            print(
+                f"⚠️ Failed to send Campaign Scenario DM to {member.name} (ID: {member.id}) for P#{proposal.get('proposal_id')} - DMs likely disabled.")
             num_failed_sends += 1
         except Exception as e:
-            print(f"❌ Error sending Campaign Scenario DM to {member.name} for P#{proposal.get('proposal_id')}: {e}")
+            print(
+                f"❌ Error sending Campaign Scenario DM to {member.name} for P#{proposal.get('proposal_id')}: {e}")
             traceback.print_exc()
             num_failed_sends += 1
 
-    print(f"INFO: Batch DM sending for {member.name} for C#{scenarios_data[0].get('campaign_id')}: {num_successful_sends} sent, {num_failed_sends} failed.")
+    print(
+        f"INFO: Batch DM sending for {member.name} for C#{scenarios_data[0].get('campaign_id')}: {num_successful_sends} sent, {num_failed_sends} failed.")
     # Returns True if any attempt was made, individual failures are logged.
     # Could be changed to `return num_successful_sends > 0` if at least one must succeed.
     return True
@@ -1033,6 +1104,7 @@ async def send_campaign_scenario_dms_to_user(member: discord.Member, scenarios_d
 # ========================
 # 🔹 HELPER FUNCTIONS (Keep relevant ones here)
 # ========================
+
 
 def format_deadline(deadline_data):
     """Format the deadline data (string or datetime) for display"""
