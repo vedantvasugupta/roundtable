@@ -1722,3 +1722,131 @@ async def send_batched_campaign_dms(guild: discord.Guild, campaign_id: int, scen
 #     return members
 
 # Ensure other functions like format_vote_results, check_expired_proposals, etc. are below this
+
+
+async def _calculate_campaign_token_stats(campaign_id: int) -> Dict[str, Any]:
+    """Compute token distribution stats for a completed campaign."""
+    stats = {
+        "total_allocated_tokens": 0,
+        "total_invested_tokens": 0,
+        "unused_tokens": 0,
+        "num_enrolled_voters": 0,
+        "num_participants": 0,
+    }
+
+    campaign = await db.get_campaign(campaign_id)
+    if not campaign:
+        return stats
+
+    total_tokens_per_voter = campaign.get("total_tokens_per_voter", 0)
+    enrolled_user_ids = await db.get_enrolled_voter_ids_for_campaign(campaign_id)
+    stats["num_enrolled_voters"] = len(enrolled_user_ids)
+    stats["total_allocated_tokens"] = total_tokens_per_voter * stats["num_enrolled_voters"]
+
+    # Gather all votes across scenarios in this campaign
+    proposals = await db.get_proposals_by_campaign_id(campaign_id)
+    participant_ids = set()
+    for proposal in proposals:
+        votes = await db.get_proposal_votes(proposal["proposal_id"])
+        for vote in votes:
+            tokens = vote.get("tokens_invested") or 0
+            stats["total_invested_tokens"] += tokens
+            participant_ids.add(vote.get("user_id"))
+
+    stats["num_participants"] = len(participant_ids)
+    stats["unused_tokens"] = max(stats["total_allocated_tokens"] - stats["total_invested_tokens"], 0)
+    return stats
+
+
+async def _generate_campaign_completion_summary(campaign: Dict[str, Any], scenarios: List[Dict[str, Any]]) -> discord.Embed:
+    """Build a detailed embed summarizing campaign outcomes and token stats."""
+    campaign_id = campaign.get("campaign_id")
+    token_stats = await _calculate_campaign_token_stats(campaign_id)
+
+    embed = discord.Embed(
+        title=f"Campaign Completed: '{campaign.get('title', 'Untitled')}' (C#{campaign_id})",
+        description=f"All {len(scenarios)} scenario(s) have concluded.",
+        color=discord.Color.gold(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    # Scenario outcomes
+    scenario_lines = []
+    sorted_scenarios = sorted(scenarios, key=lambda s: s.get("scenario_order", 0))
+    for sc in sorted_scenarios:
+        result = await db.get_proposal_results(sc["proposal_id"])
+        winner = result.get("winner") if result else None
+        line = f"S#{sc.get('scenario_order')} P#{sc['proposal_id']} - {sc.get('status')}"
+        if winner:
+            line += f" → {winner}"
+        scenario_lines.append(line)
+    if scenario_lines:
+        embed.add_field(name="Scenario Outcomes", value="\n".join(scenario_lines), inline=False)
+
+    # Token statistics
+    token_lines = [
+        f"Allocated: {token_stats['total_allocated_tokens']}",
+        f"Invested: {token_stats['total_invested_tokens']}",
+        f"Unspent: {token_stats['unused_tokens']}",
+        f"Enrolled Voters: {token_stats['num_enrolled_voters']}",
+        f"Participants: {token_stats['num_participants']}"
+    ]
+    embed.add_field(name="Token Stats", value="\n".join(token_lines), inline=False)
+
+    return embed
+
+
+async def _complete_campaign_automatically(campaign_id: int, bot_instance: commands.Bot) -> Tuple[bool, str]:
+    """Finalize a campaign when all scenarios are closed and post a summary."""
+    try:
+        campaign = await db.get_campaign(campaign_id)
+        if not campaign:
+            return False, f"Campaign C#{campaign_id} not found."
+
+        guild = bot_instance.get_guild(campaign["guild_id"])
+        if not guild:
+            return False, f"Guild {campaign['guild_id']} not found."
+
+        scenarios = await db.get_proposals_by_campaign_id(campaign_id, campaign.get("guild_id"))
+        incomplete = [s for s in scenarios if s.get("status") not in ["Closed", "Passed", "Failed"]]
+        if incomplete:
+            return False, f"Campaign C#{campaign_id} has active scenarios."
+
+        await db.update_campaign_status(campaign_id, "completed")
+
+        summary_embed = await _generate_campaign_completion_summary(campaign, scenarios)
+
+        results_channel = discord.utils.get(
+            guild.text_channels, name=CHANNELS.get("results", "governance-results")
+        )
+        if results_channel:
+            await results_channel.send(embed=summary_embed)
+
+        voting_channel = discord.utils.get(
+            guild.text_channels, name=CHANNELS.get("voting_room", "voting-room")
+        )
+        if voting_channel and (not results_channel or voting_channel.id != results_channel.id):
+            await voting_channel.send(
+                f"🏁 **Campaign Completed:** '{campaign.get('title')}' (C#{campaign_id})",
+                embed=summary_embed,
+            )
+
+        audit_channel = discord.utils.get(guild.text_channels, name=CHANNELS.get("audit", "audit-log"))
+        if audit_channel:
+            await audit_channel.send(
+                f"🏁 **Campaign Completed**: C#{campaign_id} ('{campaign.get('title', 'Untitled')}') has concluded."
+            )
+
+        try:
+            from proposals import _update_campaign_control_panel
+
+            await _update_campaign_control_panel(campaign_id, bot_instance)
+        except Exception as e:
+            print(f"ERROR: Unable to update campaign control panel for C#{campaign_id}: {e}")
+
+        return True, f"Campaign C#{campaign_id} marked completed."
+    except Exception as e:
+        print(f"ERROR auto-completing campaign C#{campaign_id}: {e}")
+        traceback.print_exc()
+        return False, f"Failed to complete campaign C#{campaign_id}."
+
