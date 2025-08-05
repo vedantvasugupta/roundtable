@@ -1,12 +1,15 @@
-import utils
-import discord
 import asyncio
-from datetime import datetime, timezone
-import db  # Assuming db can be imported here
+import datetime
 import json
-from typing import List, Dict, Any, Optional, Union, Tuple
-from discord.ext import commands
 import traceback
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+
+import discord
+from discord.ext import commands
+
+import db  # Assuming db can be imported here
+import utils
 
 # Import CHANNELS from utils
 from utils import CHANNELS
@@ -19,7 +22,15 @@ from utils import CHANNELS
 # Used as fallback for options
 from db import get_proposal_options
 # Used for formatting output
-from utils import create_progress_bar, format_time_remaining, extract_options_from_description, get_ordinal_suffix
+from utils import (
+    create_progress_bar,
+    extract_options_from_description,
+    format_time_remaining,
+    get_ordinal_suffix,
+)
+
+if TYPE_CHECKING:
+    from proposals import CampaignControlView
 
 # ========================
 # 🔹 VOTING MECHANISMS (COUNTING LOGIC)
@@ -853,8 +864,12 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         # NEW: Auto-progression logic for campaign scenarios
         if proposal.get('campaign_id'):
             campaign_id = proposal['campaign_id']
+            guild_id = proposal.get('server_id')
             print(f"DEBUG: Checking for auto-progression in campaign C#{campaign_id} after P#{proposal_id} completed")
-            
+
+            # Try to fetch bot instance and guild for channel operations
+            bot_instance = None
+            guild = None
             try:
                 # Get all proposals for this campaign
                 campaign_proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=guild.id)
@@ -880,9 +895,13 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
                             scenario_proposal_ids=queued_scenario_ids,
                             bot_instance=bot_instance
                         )
-                        
+
                         if success_auto_start:
                             print(f"DEBUG: Successfully auto-started queued scenarios in C#{campaign_id}: {auto_start_msg}")
+                            try:
+                                await _update_campaign_control_panel_auto(campaign_id, bot_instance)
+                            except Exception as e_update:
+                                print(f"ERROR updating campaign control panel for C#{campaign_id}: {e_update}")
                         else:
                             print(f"DEBUG: Failed to auto-start queued scenarios in C#{campaign_id}: {auto_start_msg}")
                             
@@ -890,9 +909,67 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
                         print(f"ERROR: Failed to auto-start queued scenarios in C#{campaign_id}: {e_auto_start}")
                         import traceback
                         traceback.print_exc()
+
                 else:
-                    print(f"DEBUG: No queued scenarios found in C#{campaign_id} for auto-progression")
-                    
+                    closed_scenarios = [
+                        p for p in campaign_proposals if p['status'] in ['Closed', 'Passed', 'Failed']
+                    ]
+                    last_processed_order = max(
+                        (p.get('scenario_order') or 0 for p in closed_scenarios), default=0
+                    )
+                    next_order = last_processed_order + 1
+
+                    if campaign and next_order > campaign.get('num_expected_scenarios', 0):
+                        print(f"DEBUG: Campaign C#{campaign_id} has exceeded expected scenarios; marking completed")
+                        await db.update_campaign_status(campaign_id, 'completed')
+                        if guild:
+                            audit_channel = discord.utils.get(guild.text_channels, name='audit-log')
+                            if audit_channel:
+                                await audit_channel.send(
+                                    f"🏁 **Campaign Completed**: C#{campaign_id} ('{campaign.get('title', 'Untitled')}') has concluded all scenarios."
+                                )
+                    else:
+                        scenarios_to_start_ids = [
+                            p['proposal_id']
+                            for p in campaign_proposals
+                            if p.get('scenario_order') == next_order and p['status'] == 'ApprovedScenario'
+                        ]
+
+                        if scenarios_to_start_ids and guild and bot_instance:
+                            print(
+                                f"DEBUG: Auto-starting {len(scenarios_to_start_ids)} scenario(s) for order {next_order} in C#{campaign_id}: {scenarios_to_start_ids}"
+                            )
+                            success_auto_start, auto_start_msg = await initiate_campaign_stage_voting(
+                                guild=guild,
+                                campaign_id=campaign_id,
+                                scenario_proposal_ids=scenarios_to_start_ids,
+                                bot_instance=bot_instance
+                            )
+                            audit_channel = None
+                            if guild:
+                                audit_channel = discord.utils.get(guild.text_channels, name='audit-log')
+
+                            if success_auto_start:
+                                print(
+                                    f"DEBUG: Successfully auto-started scenarios for C#{campaign_id} order {next_order}: {auto_start_msg}"
+                                )
+                                if audit_channel:
+                                    await audit_channel.send(
+                                        f"▶️ **Next Campaign Stage**: Auto-started {len(scenarios_to_start_ids)} scenario(s) for order {next_order} in C#{campaign_id}."
+                                    )
+                            else:
+                                print(
+                                    f"ERROR: Failed to auto-start scenarios for C#{campaign_id} order {next_order}: {auto_start_msg}"
+                                )
+                                if audit_channel:
+                                    await audit_channel.send(
+                                        f"⚠️ **Campaign Stage Start Failed**: Attempted to auto-start scenario(s) for order {next_order} in C#{campaign_id}, but encountered an error."
+                                    )
+                        else:
+                            print(
+                                f"DEBUG: No approved scenarios found for order {next_order} in C#{campaign_id} or missing bot/guild context"
+                            )
+
             except Exception as e_progression:
                 print(f"ERROR: Exception during auto-progression check for C#{campaign_id}: {e_progression}")
                 import traceback
