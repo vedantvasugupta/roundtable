@@ -1,12 +1,15 @@
-import utils
-import discord
 import asyncio
-from datetime import datetime, timezone
-import db  # Assuming db can be imported here
+import datetime
 import json
-from typing import List, Dict, Any, Optional, Union, Tuple
-from discord.ext import commands
 import traceback
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+
+import discord
+from discord.ext import commands
+
+import db  # Assuming db can be imported here
+import utils
 
 # Import CHANNELS from utils
 from utils import CHANNELS
@@ -19,7 +22,15 @@ from utils import CHANNELS
 # Used as fallback for options
 from db import get_proposal_options
 # Used for formatting output
-from utils import create_progress_bar, format_time_remaining, extract_options_from_description, get_ordinal_suffix
+from utils import (
+    create_progress_bar,
+    extract_options_from_description,
+    format_time_remaining,
+    get_ordinal_suffix,
+)
+
+if TYPE_CHECKING:
+    from proposals import CampaignControlView
 
 # ========================
 # 🔹 VOTING MECHANISMS (COUNTING LOGIC)
