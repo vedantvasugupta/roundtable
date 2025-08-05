@@ -460,133 +460,90 @@ class RunoffVoting:
         return "Instructions defined in voting.py"
 
 
-class DHondtMethod:
-    """D'Hondt method for proportional representation"""
+
+class CondorcetMethod:
+    """Condorcet method based on pairwise comparisons"""
 
     @staticmethod
     def count_votes(votes: List[Dict], options: List[str], hyperparameters: Optional[Dict[str, Any]] = None):
-        """Counts D'Hondt votes, applying token weighting, typically for seat allocation."""
-        if hyperparameters is None: hyperparameters = {}
-        num_seats_to_allocate = hyperparameters.get('num_seats', 1) # Default to 1 seat (like plurality winner)
-        try:
-            num_seats_to_allocate = int(num_seats_to_allocate)
-            if num_seats_to_allocate <= 0:
-                num_seats_to_allocate = 1 # Fallback if invalid
-        except ValueError:
-            num_seats_to_allocate = 1 # Fallback if not an int
+        """Counts Condorcet votes using weighted pairwise comparisons."""
+        if hyperparameters is None:
+            hyperparameters = {}
 
-        party_totals = {option: {'raw_votes': 0, 'weighted_votes': 0} for option in options}
+        pairwise_matrix = {a: {b: 0 for b in options if b != a} for a in options}
         total_raw_ballots = 0
-        total_weighted_vote_power = 0
+        total_weighted_ballot_power = 0
 
         for vote_record in votes:
             vote_data_str = vote_record.get('vote_data')
             try:
                 vote_data = json.loads(vote_data_str) if isinstance(vote_data_str, str) else vote_data_str
             except json.JSONDecodeError:
-                print(f"WARNING: DHondt: Could not decode vote_data JSON: {vote_data_str}. Vote: {vote_record}")
+                print(f"WARNING: Condorcet: Could not decode vote_data JSON: {vote_data_str}. Vote: {vote_record}")
                 continue
 
-            if not isinstance(vote_data, dict) or not isinstance(vote_data.get('option'), str):
-                print(f"WARNING: DHondt: Invalid vote_data or missing/invalid option. Vote: {vote_record}")
+            if not isinstance(vote_data, dict) or not isinstance(vote_data.get('rankings'), list):
+                print(f"WARNING: Condorcet: Invalid vote_data structure or missing rankings. Vote: {vote_record}")
                 continue
 
-            chosen_option = vote_data['option']
-            if chosen_option not in options:
-                print(f"WARNING: DHondt: Vote for unknown option '{chosen_option}'. Valid: {options}. Vote: {vote_record}")
+            rankings = [r for r in vote_data['rankings'] if isinstance(r, str) and r in options]
+            if not rankings:
                 continue
 
-            vote_weight = vote_record.get('tokens_invested', 1)
-            if vote_weight is None or vote_weight < 0: vote_weight = 1
+            weight = vote_record.get('tokens_invested', 1)
+            if weight is None or weight < 0:
+                weight = 1
 
-            party_totals[chosen_option]['raw_votes'] += 1
-            party_totals[chosen_option]['weighted_votes'] += vote_weight
             total_raw_ballots += 1
-            total_weighted_vote_power += vote_weight
+            total_weighted_ballot_power += weight
 
-        # D'Hondt allocation process
-        seats_won = {option: 0 for option in options}
-        quotients_history = [] # To store quotients at each allocation step
+            rank_order = {opt: idx for idx, opt in enumerate(rankings)}
+            default_rank = len(options)
 
-        for seat_num in range(1, num_seats_to_allocate + 1):
-            highest_quotient = -1
-            winning_option_for_seat = None
-            current_round_quotients = {}
+            for i in range(len(options)):
+                for j in range(i + 1, len(options)):
+                    a = options[i]
+                    b = options[j]
+                    rank_a = rank_order.get(a, default_rank)
+                    rank_b = rank_order.get(b, default_rank)
+                    if rank_a < rank_b:
+                        pairwise_matrix[a][b] += weight
+                    elif rank_b < rank_a:
+                        pairwise_matrix[b][a] += weight
+                    # Ties contribute nothing
 
-            for option in options:
-                # D'Hondt quotient = total_weighted_votes / (seats_already_won_by_party + 1)
-                quotient = party_totals[option]['weighted_votes'] / (seats_won[option] + 1)
-                current_round_quotients[option] = quotient
-                if quotient > highest_quotient:
-                    highest_quotient = quotient
-                    winning_option_for_seat = option
-                elif quotient == highest_quotient: # Tie-breaking: typically by original total votes, or predefined order
-                    # Simple tie-break: prefer party with more total weighted votes. If still tied, an arbitrary but consistent rule (e.g. option name)
-                    if winning_option_for_seat is None or party_totals[option]['weighted_votes'] > party_totals[winning_option_for_seat]['weighted_votes']:
-                        winning_option_for_seat = option
-                    elif party_totals[option]['weighted_votes'] == party_totals[winning_option_for_seat]['weighted_votes']:
-                        if option < winning_option_for_seat: # Arbitrary: alphabetical if total votes are also tied
-                             winning_option_for_seat = option
+        winner = None
+        for option in options:
+            beats_all = True
+            for opponent in options:
+                if option == opponent:
+                    continue
+                if pairwise_matrix[option].get(opponent, 0) <= pairwise_matrix[opponent].get(option, 0):
+                    beats_all = False
+                    break
+            if beats_all:
+                winner = option
+                break
 
-            if winning_option_for_seat:
-                seats_won[winning_option_for_seat] += 1
-                quotients_history.append({
-                    'seat_number': seat_num,
-                    'awarded_to': winning_option_for_seat,
-                    'winning_quotient': highest_quotient,
-                    'quotients_this_round': dict(current_round_quotients) # Store all quotients for this round
-                })
-            else:
-                # This happens if no options have votes or all options eligible for a seat have a zero quotient (e.g. no votes)
-                quotients_history.append({
-                    'seat_number': seat_num,
-                    'awarded_to': None,
-                    'winning_quotient': 0,
-                    'quotients_this_round': dict(current_round_quotients),
-                    'note': 'No option eligible for this seat (e.g. zero votes or quotients).'
-                })
-                break # Stop if no one can win the current seat
-
-        # Determine a single "winner" if num_seats_to_allocate is 1, otherwise winner is more complex (list of seat holders)
-        # For consistency with other methods, if num_seats == 1, the winner is the one who got that seat.
-        # If num_seats > 1, the concept of a single 'winner' is less direct.
-        # We can list allocated seats as the primary result for multi-seat scenarios.
-        primary_winner = None
-        reason_for_no_winner = None
-        if num_seats_to_allocate == 1:
-            if quotients_history and quotients_history[0]['awarded_to']:
-                primary_winner = quotients_history[0]['awarded_to']
-            else:
-                reason_for_no_winner = "No option won the single seat (e.g. no votes)."
-        else: # Multi-seat scenario
-            # 'Winner' could be the option with most seats, or just list seat distribution
-            # For now, let's not declare a single winner for multi-seat to avoid confusion
-            reason_for_no_winner = f"{num_seats_to_allocate} seats allocated based on D'Hondt. See seat distribution."
-            if not any(s > 0 for s in seats_won.values()): # No seats allocated at all
-                 reason_for_no_winner = "No seats could be allocated (e.g. no votes)."
+        reason_for_no_winner = None if winner else "No Condorcet winner (cycle or tie)."
 
         return {
-            'mechanism': 'dhondt',
-            'party_totals_detailed': party_totals, # {option: {'raw_votes': X, 'weighted_votes': Y}}
-            'num_seats_configured': num_seats_to_allocate,
-            'seats_allocated_detailed': seats_won, # {option: num_seats_won}
-            'allocation_rounds_history': quotients_history, # List of dicts per seat allocation round
-            'winner': primary_winner, # Only if num_seats_configured == 1
-            'reason_for_no_winner': reason_for_no_winner if not primary_winner else None,
+            'mechanism': 'condorcet',
+            'pairwise_matrix': pairwise_matrix,
+            'winner': winner,
+            'reason_for_no_winner': reason_for_no_winner if not winner else None,
             'total_raw_ballots': total_raw_ballots,
-            'total_weighted_vote_power': total_weighted_vote_power
+            'total_weighted_ballot_power': total_weighted_ballot_power
         }
 
     @staticmethod
     def get_description():
-        return "Allocates multiple seats proportionally based on vote counts using successive quotients. If 1 seat, like Plurality."
+        return "Compares options head-to-head; an option that beats every other wins."
 
     @staticmethod
     def get_vote_instructions():
         # Instructions are now generated in voting.py's get_voting_instructions
         return "Instructions defined in voting.py"
-
-
 def get_voting_mechanism(mechanism_name: str):
     """Returns the appropriate voting mechanism class based on name"""
     mechanisms = {
@@ -594,7 +551,7 @@ def get_voting_mechanism(mechanism_name: str):
         "borda": BordaCount,
         "approval": ApprovalVoting,
         "runoff": RunoffVoting,
-        "dhondt": DHondtMethod
+        "condorcet": CondorcetMethod
     }
     return mechanisms.get(mechanism_name.lower())
 
@@ -659,15 +616,22 @@ async def calculate_results(proposal_id: int) -> Optional[Dict]:
             # Determine final status based on winner/reason
             final_status = "Unknown"
             if results_summary.get('winner'):
-                final_status = "Passed" # Or more specific like "Winner: [Name]"
-            elif results_summary.get('reason_for_no_winner') == "Tie": # Needs exact match for "Tie" reason
+                final_status = "Passed"  # Or more specific like "Winner: [Name]"
+            elif results_summary.get('reason_for_no_winner') == "Tie":  # Needs exact match for "Tie" reason
                 final_status = "Tied"
             elif results_summary.get('reason_for_no_winner'):
-                final_status = "Failed" # Generic fail if no winner and not a specific tie
-            elif results_summary.get('total_weighted_votes', 0) == 0 and num_abstain_votes == 0:
-                final_status = "No Votes"
-            elif results_summary.get('total_weighted_votes', 0) == 0 and num_abstain_votes > 0:
-                final_status = "Abstained"
+                final_status = "Failed"  # Generic fail if no winner and not a specific tie
+            else:
+                total_weighted = (
+                    results_summary.get('total_weighted_votes')
+                    or results_summary.get('total_weighted_vote_power')
+                    or results_summary.get('total_weighted_ballot_power')
+                    or 0
+                )
+                if total_weighted == 0 and num_abstain_votes == 0:
+                    final_status = "No Votes"
+                elif total_weighted == 0 and num_abstain_votes > 0:
+                    final_status = "Abstained"
 
             results_summary['final_status_derived'] = final_status
 
@@ -740,6 +704,7 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
             embed.add_field(name="Condorcet Verdict", value=f"Winner: {results['condorcet_winner']}", inline=True)
         else:
             embed.add_field(name="Condorcet Verdict", value="No Condorcet winner (cycle detected)", inline=True)
+
 
     # Add footer
     embed.set_footer(text=f"Results for Proposal #{proposal_id} | Calculated at {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
@@ -1270,10 +1235,11 @@ def get_voting_instructions(mechanism, options):
     options_text = ", ".join(
         [f"`{opt}`" for opt in options]) if options else "No options defined."
 
-    if mechanism in ["plurality", "dhondt"]:
+    if mechanism in ["plurality"]:
+
         instructions += f"Format: `!vote <proposal_id> <option>`\nChoose *one* option.\nAvailable options: {options_text}"
 
-    elif mechanism in ["borda", "runoff"]:
+    elif mechanism in ["borda", "runoff", "condorcet"]:
         instructions += f"Format: `!vote <proposal_id> rank option1,option2,...`\nRank the options in order of preference, separated by commas.\nAvailable options: {options_text}"
 
     elif mechanism == "approval":

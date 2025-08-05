@@ -2,7 +2,8 @@
 
 ## Current Task
 
-*   **COMPLETED: All Voting Mechanisms Submit Button Support:** Added submit buttons to all voting mechanisms (plurality, approval, runoff, borda, dhondt) for proper token allocation and finalization flow.
+*   **COMPLETED: All Voting Mechanisms Submit Button Support:** Added submit buttons to all voting mechanisms (plurality, approval, runoff, borda, Condorcet) for proper token allocation and finalization flow.
+
 *   **COMPLETED: Campaign Auto-DM for Late Scenarios:** Fixed automatic DM sending when scenarios are defined in already active campaigns, removing overly restrictive queuing logic.
 *   **COMPLETED: Approval Voting Submit Button:** Added a "Submit Vote" button to approval voting that allows users to select multiple options and then submit when ready, fixing both normal and campaign approval voting flows.
 *   **COMPLETED: Ranked Voting Submit Button:** Added submit buttons to RankedVoteView (used by runoff and borda mechanisms) with dynamic labeling showing ranking count and proper token allocation flow.
