@@ -11,8 +11,8 @@ from typing import List, Optional, Dict, Any, Union
 # Local project imports
 import db
 import utils
-import voting
 import voting_utils
+import voting
 
 # Enable all intents (or specify only the necessary ones)
 intents = discord.Intents.default()
