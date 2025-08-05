@@ -1800,72 +1800,74 @@ async def send_batched_campaign_dms(guild: discord.Guild, campaign_id: int, scen
 
 # Ensure other functions like format_vote_results, check_expired_proposals, etc. are below this
 
+class CampaignCompletionView(discord.ui.View):
+    """Simple view shown when a campaign has fully concluded."""
+    def __init__(self, campaign_id: int, bot_instance: commands.Bot):
+        super().__init__(timeout=None)
+        self.campaign_id = campaign_id
+        self.bot = bot_instance
+        # Placeholder button for future functionality (e.g., archiving)
+        archive_button = discord.ui.Button(
+            label="Archive Campaign",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"campaign_{campaign_id}_archive",
+            disabled=True
+        )
+        self.add_item(archive_button)
 
-async def _update_campaign_control_panel_auto(campaign_id: int, bot_instance: commands.Bot) -> None:
-    """Update the campaign control panel message after automatic progression."""
+async def update_campaign_completion_message(guild: discord.Guild, campaign_id: int, bot_instance: commands.Bot) -> bool:
+    """Update the campaign control message to reflect completion.
+
+    Fetches the campaign's control_message_id, then edits the control panel
+    message with a completion-themed embed and the CampaignCompletionView.
+    Returns True if the message was edited successfully.
+    """
     try:
         campaign_data = await db.get_campaign(campaign_id)
         if not campaign_data:
-            print(f"WARN: Cannot auto-update control panel for C#{campaign_id} - campaign not found")
-            return
-
-        guild = bot_instance.get_guild(campaign_data.get('guild_id'))
-        if not guild:
-            print(f"WARN: Cannot auto-update control panel for C#{campaign_id} - guild not found")
-            return
-
-        campaign_mgmt_channel_name = utils.CHANNELS.get("campaign_management", "campaign-management")
-        campaign_mgmt_channel = discord.utils.get(guild.text_channels, name=campaign_mgmt_channel_name)
-        if not campaign_mgmt_channel:
-            print(f"WARN: Cannot auto-update control panel for C#{campaign_id} - campaign management channel not found")
-            return
+            print(f"WARN: Campaign C#{campaign_id} not found for completion update")
+            return False
 
         control_message_id = campaign_data.get('control_message_id')
         if not control_message_id:
-            print(f"WARN: Cannot auto-update control panel for C#{campaign_id} - no control message ID stored")
-            return
+            print(f"WARN: No control_message_id stored for C#{campaign_id}")
+            return False
+
+        channel_name = CHANNELS.get("campaign_management", "campaign-management")
+        campaign_channel = discord.utils.get(guild.text_channels, name=channel_name)
+        if not campaign_channel:
+            print(f"WARN: Campaign management channel '{channel_name}' not found in guild {guild.id}")
+            return False
 
         try:
-            control_message = await campaign_mgmt_channel.fetch_message(control_message_id)
+            control_message = await campaign_channel.fetch_message(control_message_id)
         except discord.NotFound:
             print(f"WARN: Control message {control_message_id} for C#{campaign_id} not found")
-            return
+            return False
         except discord.HTTPException as e:
-            print(f"ERROR: Failed to fetch control message for C#{campaign_id}: {e}")
-            return
+            print(f"ERROR fetching control message {control_message_id} for C#{campaign_id}: {e}")
+            return False
 
-        from proposals import CampaignControlView  # local import to avoid circular
-        control_view = CampaignControlView(campaign_id, bot_instance)
-        await control_view.update_button_states()
-
-        creator = guild.get_member(campaign_data.get('creator_id'))
-
-        embed_title = f"Campaign Management: '{campaign_data['title']}' (ID: C#{campaign_id})"
-        creator_text = creator.mention if creator else f"ID: {campaign_data['creator_id']}"
-        embed_description = f"**Creator:** {creator_text}\n"
-        embed_description += f"**Description:** {campaign_data['description'] or 'Not provided.'}\n"
-        embed_description += f"**Total Scenarios Expected:** {campaign_data['num_expected_scenarios']}\n"
-        embed_description += f"**Currently Defined:** {campaign_data['current_defined_scenarios']}"
-
-        new_color = discord.Color.blue()
-        if campaign_data['status'] == 'active':
-            new_color = discord.Color.green()
-        elif campaign_data['status'] == 'completed':
-            new_color = discord.Color.gold()
-        elif campaign_data['status'] == 'setup':
-            new_color = discord.Color.light_grey()
-
-        updated_embed = discord.Embed(
-            title=embed_title,
-            description=embed_description,
-            color=new_color,
+        completion_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        embed = discord.Embed(
+            title=f"🏁 Campaign Completed: '{campaign_data.get('title', 'Untitled')}'",
+            description=(
+                f"All scenarios for this campaign have been processed.\n"
+                f"Completed: {completion_time} UTC"
+            ),
+            color=discord.Color.gold()
         )
-        updated_embed.add_field(name="Status", value=campaign_data['status'].title(), inline=True)
-        updated_embed.set_footer(text=f"Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
+        embed.add_field(
+            name="Next Steps",
+            value="Review the results and consider archiving the campaign.",
+            inline=False
+        )
+        embed.set_footer(text=f"Campaign ID: C#{campaign_id}")
 
-        await control_message.edit(embed=updated_embed, view=control_view)
-        print(f"DEBUG: Auto-updated control panel for C#{campaign_id}")
-
+        completion_view = CampaignCompletionView(campaign_id, bot_instance)
+        await control_message.edit(embed=embed, view=completion_view)
+        return True
     except Exception as e:
-        print(f"ERROR: Failed to auto-update campaign control panel for C#{campaign_id}: {e}")
-        traceback.print_exc()
+        print(f"ERROR updating completion message for C#{campaign_id}: {e}")
+        return False
+
