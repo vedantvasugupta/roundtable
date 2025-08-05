@@ -11,6 +11,14 @@ import traceback
 
 # Import functions/classes from voting_utils and utils
 import voting_utils  # Import the module to access its functions
+from voting_utils import (
+    PluralityVoting,
+    BordaCount,
+    ApprovalVoting,
+    RunoffVoting,
+    CondorcetMethod,
+    get_voting_mechanism,
+)
 import utils  # Import the module to access its functions
 # ========================
 # 🔹 INTERACTIVE VOTING UI
