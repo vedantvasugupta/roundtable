@@ -36,7 +36,8 @@
     *   `format_vote_results` displays weighted results.
 *   **Automated Server Guide Channel (`main.py`, `utils.py`):
     *   A `#server-guide` channel is automatically created when the bot joins a server or on startup for existing servers.
-    *   This channel is populated with a single, comprehensive embed message explaining server channels, detailed explanations of available voting protocols (Plurality, Borda, Approval, Runoff, D'Hondt, Copeland), and basic bot command usage.
+    *   This channel is populated with a single, comprehensive embed message explaining server channels, detailed explanations of available voting protocols (Plurality, Borda, Approval, Runoff, Condorcet, Copeland), and basic bot command usage.
+
     *   The channel is read-only for users, and the bot purges its previous guide message before sending a new one to keep it clean.
 
 ## What's Left to Build / Verify Thoroughly
@@ -73,7 +74,6 @@
 *   **`TokenInvestmentModal` and `BaseVoteView.finalize_vote` (`voting.py`):** Implemented and recent plurality flow fix applied; requires thorough testing to ensure robustness and correct behavior in all scenarios (e.g., edge cases for token values, interaction deferrals).
 *   **Validation in `process_vote` (`voting.py`):** Some validation logic might still reside in `process_vote`. Ideally, all user input validation should occur in the UI layer (Views/Modals) before calling `finalize_vote` or `process_vote`.
 *   **`RankedVoteView` Implementation (Standalone/Campaign):** Still needs careful implementation/verification.
-*   **Clarity of D'Hondt Results (Standalone/Campaign - carry over).**
 
 ## Evolution of Project Decisions
 

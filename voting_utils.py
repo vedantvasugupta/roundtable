@@ -1,12 +1,15 @@
-import utils
-import discord
 import asyncio
-from datetime import datetime, timezone
-import db  # Assuming db can be imported here
+import datetime
 import json
-from typing import List, Dict, Any, Optional, Union, Tuple
-from discord.ext import commands
 import traceback
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+
+import discord
+from discord.ext import commands
+
+import db  # Assuming db can be imported here
+import utils
 
 # Import CHANNELS from utils
 from utils import CHANNELS
@@ -19,7 +22,15 @@ from utils import CHANNELS
 # Used as fallback for options
 from db import get_proposal_options
 # Used for formatting output
-from utils import create_progress_bar, format_time_remaining, extract_options_from_description, get_ordinal_suffix
+from utils import (
+    create_progress_bar,
+    extract_options_from_description,
+    format_time_remaining,
+    get_ordinal_suffix,
+)
+
+if TYPE_CHECKING:
+    from proposals import CampaignControlView
 
 # ========================
 # 🔹 VOTING MECHANISMS (COUNTING LOGIC)
@@ -460,133 +471,90 @@ class RunoffVoting:
         return "Instructions defined in voting.py"
 
 
-class DHondtMethod:
-    """D'Hondt method for proportional representation"""
+
+class CondorcetMethod:
+    """Condorcet method based on pairwise comparisons"""
 
     @staticmethod
     def count_votes(votes: List[Dict], options: List[str], hyperparameters: Optional[Dict[str, Any]] = None):
-        """Counts D'Hondt votes, applying token weighting, typically for seat allocation."""
-        if hyperparameters is None: hyperparameters = {}
-        num_seats_to_allocate = hyperparameters.get('num_seats', 1) # Default to 1 seat (like plurality winner)
-        try:
-            num_seats_to_allocate = int(num_seats_to_allocate)
-            if num_seats_to_allocate <= 0:
-                num_seats_to_allocate = 1 # Fallback if invalid
-        except ValueError:
-            num_seats_to_allocate = 1 # Fallback if not an int
+        """Counts Condorcet votes using weighted pairwise comparisons."""
+        if hyperparameters is None:
+            hyperparameters = {}
 
-        party_totals = {option: {'raw_votes': 0, 'weighted_votes': 0} for option in options}
+        pairwise_matrix = {a: {b: 0 for b in options if b != a} for a in options}
         total_raw_ballots = 0
-        total_weighted_vote_power = 0
+        total_weighted_ballot_power = 0
 
         for vote_record in votes:
             vote_data_str = vote_record.get('vote_data')
             try:
                 vote_data = json.loads(vote_data_str) if isinstance(vote_data_str, str) else vote_data_str
             except json.JSONDecodeError:
-                print(f"WARNING: DHondt: Could not decode vote_data JSON: {vote_data_str}. Vote: {vote_record}")
+                print(f"WARNING: Condorcet: Could not decode vote_data JSON: {vote_data_str}. Vote: {vote_record}")
                 continue
 
-            if not isinstance(vote_data, dict) or not isinstance(vote_data.get('option'), str):
-                print(f"WARNING: DHondt: Invalid vote_data or missing/invalid option. Vote: {vote_record}")
+            if not isinstance(vote_data, dict) or not isinstance(vote_data.get('rankings'), list):
+                print(f"WARNING: Condorcet: Invalid vote_data structure or missing rankings. Vote: {vote_record}")
                 continue
 
-            chosen_option = vote_data['option']
-            if chosen_option not in options:
-                print(f"WARNING: DHondt: Vote for unknown option '{chosen_option}'. Valid: {options}. Vote: {vote_record}")
+            rankings = [r for r in vote_data['rankings'] if isinstance(r, str) and r in options]
+            if not rankings:
                 continue
 
-            vote_weight = vote_record.get('tokens_invested', 1)
-            if vote_weight is None or vote_weight < 0: vote_weight = 1
+            weight = vote_record.get('tokens_invested', 1)
+            if weight is None or weight < 0:
+                weight = 1
 
-            party_totals[chosen_option]['raw_votes'] += 1
-            party_totals[chosen_option]['weighted_votes'] += vote_weight
             total_raw_ballots += 1
-            total_weighted_vote_power += vote_weight
+            total_weighted_ballot_power += weight
 
-        # D'Hondt allocation process
-        seats_won = {option: 0 for option in options}
-        quotients_history = [] # To store quotients at each allocation step
+            rank_order = {opt: idx for idx, opt in enumerate(rankings)}
+            default_rank = len(options)
 
-        for seat_num in range(1, num_seats_to_allocate + 1):
-            highest_quotient = -1
-            winning_option_for_seat = None
-            current_round_quotients = {}
+            for i in range(len(options)):
+                for j in range(i + 1, len(options)):
+                    a = options[i]
+                    b = options[j]
+                    rank_a = rank_order.get(a, default_rank)
+                    rank_b = rank_order.get(b, default_rank)
+                    if rank_a < rank_b:
+                        pairwise_matrix[a][b] += weight
+                    elif rank_b < rank_a:
+                        pairwise_matrix[b][a] += weight
+                    # Ties contribute nothing
 
-            for option in options:
-                # D'Hondt quotient = total_weighted_votes / (seats_already_won_by_party + 1)
-                quotient = party_totals[option]['weighted_votes'] / (seats_won[option] + 1)
-                current_round_quotients[option] = quotient
-                if quotient > highest_quotient:
-                    highest_quotient = quotient
-                    winning_option_for_seat = option
-                elif quotient == highest_quotient: # Tie-breaking: typically by original total votes, or predefined order
-                    # Simple tie-break: prefer party with more total weighted votes. If still tied, an arbitrary but consistent rule (e.g. option name)
-                    if winning_option_for_seat is None or party_totals[option]['weighted_votes'] > party_totals[winning_option_for_seat]['weighted_votes']:
-                        winning_option_for_seat = option
-                    elif party_totals[option]['weighted_votes'] == party_totals[winning_option_for_seat]['weighted_votes']:
-                        if option < winning_option_for_seat: # Arbitrary: alphabetical if total votes are also tied
-                             winning_option_for_seat = option
+        winner = None
+        for option in options:
+            beats_all = True
+            for opponent in options:
+                if option == opponent:
+                    continue
+                if pairwise_matrix[option].get(opponent, 0) <= pairwise_matrix[opponent].get(option, 0):
+                    beats_all = False
+                    break
+            if beats_all:
+                winner = option
+                break
 
-            if winning_option_for_seat:
-                seats_won[winning_option_for_seat] += 1
-                quotients_history.append({
-                    'seat_number': seat_num,
-                    'awarded_to': winning_option_for_seat,
-                    'winning_quotient': highest_quotient,
-                    'quotients_this_round': dict(current_round_quotients) # Store all quotients for this round
-                })
-            else:
-                # This happens if no options have votes or all options eligible for a seat have a zero quotient (e.g. no votes)
-                quotients_history.append({
-                    'seat_number': seat_num,
-                    'awarded_to': None,
-                    'winning_quotient': 0,
-                    'quotients_this_round': dict(current_round_quotients),
-                    'note': 'No option eligible for this seat (e.g. zero votes or quotients).'
-                })
-                break # Stop if no one can win the current seat
-
-        # Determine a single "winner" if num_seats_to_allocate is 1, otherwise winner is more complex (list of seat holders)
-        # For consistency with other methods, if num_seats == 1, the winner is the one who got that seat.
-        # If num_seats > 1, the concept of a single 'winner' is less direct.
-        # We can list allocated seats as the primary result for multi-seat scenarios.
-        primary_winner = None
-        reason_for_no_winner = None
-        if num_seats_to_allocate == 1:
-            if quotients_history and quotients_history[0]['awarded_to']:
-                primary_winner = quotients_history[0]['awarded_to']
-            else:
-                reason_for_no_winner = "No option won the single seat (e.g. no votes)."
-        else: # Multi-seat scenario
-            # 'Winner' could be the option with most seats, or just list seat distribution
-            # For now, let's not declare a single winner for multi-seat to avoid confusion
-            reason_for_no_winner = f"{num_seats_to_allocate} seats allocated based on D'Hondt. See seat distribution."
-            if not any(s > 0 for s in seats_won.values()): # No seats allocated at all
-                 reason_for_no_winner = "No seats could be allocated (e.g. no votes)."
+        reason_for_no_winner = None if winner else "No Condorcet winner (cycle or tie)."
 
         return {
-            'mechanism': 'dhondt',
-            'party_totals_detailed': party_totals, # {option: {'raw_votes': X, 'weighted_votes': Y}}
-            'num_seats_configured': num_seats_to_allocate,
-            'seats_allocated_detailed': seats_won, # {option: num_seats_won}
-            'allocation_rounds_history': quotients_history, # List of dicts per seat allocation round
-            'winner': primary_winner, # Only if num_seats_configured == 1
-            'reason_for_no_winner': reason_for_no_winner if not primary_winner else None,
+            'mechanism': 'condorcet',
+            'pairwise_matrix': pairwise_matrix,
+            'winner': winner,
+            'reason_for_no_winner': reason_for_no_winner if not winner else None,
             'total_raw_ballots': total_raw_ballots,
-            'total_weighted_vote_power': total_weighted_vote_power
+            'total_weighted_ballot_power': total_weighted_ballot_power
         }
 
     @staticmethod
     def get_description():
-        return "Allocates multiple seats proportionally based on vote counts using successive quotients. If 1 seat, like Plurality."
+        return "Compares options head-to-head; an option that beats every other wins."
 
     @staticmethod
     def get_vote_instructions():
         # Instructions are now generated in voting.py's get_voting_instructions
         return "Instructions defined in voting.py"
-
-
 def get_voting_mechanism(mechanism_name: str):
     """Returns the appropriate voting mechanism class based on name"""
     mechanisms = {
@@ -594,7 +562,7 @@ def get_voting_mechanism(mechanism_name: str):
         "borda": BordaCount,
         "approval": ApprovalVoting,
         "runoff": RunoffVoting,
-        "dhondt": DHondtMethod
+        "condorcet": CondorcetMethod
     }
     return mechanisms.get(mechanism_name.lower())
 
@@ -659,15 +627,22 @@ async def calculate_results(proposal_id: int) -> Optional[Dict]:
             # Determine final status based on winner/reason
             final_status = "Unknown"
             if results_summary.get('winner'):
-                final_status = "Passed" # Or more specific like "Winner: [Name]"
-            elif results_summary.get('reason_for_no_winner') == "Tie": # Needs exact match for "Tie" reason
+                final_status = "Passed"  # Or more specific like "Winner: [Name]"
+            elif results_summary.get('reason_for_no_winner') == "Tie":  # Needs exact match for "Tie" reason
                 final_status = "Tied"
             elif results_summary.get('reason_for_no_winner'):
-                final_status = "Failed" # Generic fail if no winner and not a specific tie
-            elif results_summary.get('total_weighted_votes', 0) == 0 and num_abstain_votes == 0:
-                final_status = "No Votes"
-            elif results_summary.get('total_weighted_votes', 0) == 0 and num_abstain_votes > 0:
-                final_status = "Abstained"
+                final_status = "Failed"  # Generic fail if no winner and not a specific tie
+            else:
+                total_weighted = (
+                    results_summary.get('total_weighted_votes')
+                    or results_summary.get('total_weighted_vote_power')
+                    or results_summary.get('total_weighted_ballot_power')
+                    or 0
+                )
+                if total_weighted == 0 and num_abstain_votes == 0:
+                    final_status = "No Votes"
+                elif total_weighted == 0 and num_abstain_votes > 0:
+                    final_status = "Abstained"
 
             results_summary['final_status_derived'] = final_status
 
@@ -728,11 +703,19 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
         embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
         embed.add_field(name="Total Weighted Ballot Power", value=str(results.get('total_weighted_ballot_power', 0)), inline=True)
         embed.add_field(name="Round Details", value="\n".join([f"**Round {round_num}**\n" + round_text for round_num, round_text in enumerate(results['rounds_detailed'], 1)]), inline=False)
-    elif mechanism == 'dhondt':
-        embed.add_field(name="Seats to Allocate", value=str(results.get('num_seats_configured', 1)), inline=True)
-        embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
-        embed.add_field(name="Total Weighted Vote Power", value=str(results.get('total_weighted_vote_power', 0)), inline=True)
-        embed.add_field(name="Seat Allocation", value="\n".join([f"• {option}: {num_seats} ({party_total_w:.2f} weighted / {party_total_r} raw)" for option, num_seats, party_total_w, party_total_r in zip(results['options_ranked'], results['seats_allocated_detailed'].values(), results['party_totals_detailed'].values(), results['party_totals_detailed'].values())]), inline=False)
+    elif mechanism == 'condorcet':
+        pairwise_matrix = results.get('pairwise_results', {}) or results.get('pairwise_matrix', {})
+        pairwise_lines = []
+        for option, opponents in pairwise_matrix.items():
+            matchups = ", ".join([f"{opp}:{res}" for opp, res in opponents.items()])
+            pairwise_lines.append(f"{option} -> {matchups}")
+        pairwise_text = "\n".join(pairwise_lines) if pairwise_lines else "No pairwise data available"
+        embed.add_field(name="Pairwise Matchups", value=pairwise_text, inline=False)
+        if results.get('condorcet_winner'):
+            embed.add_field(name="Condorcet Verdict", value=f"Winner: {results['condorcet_winner']}", inline=True)
+        else:
+            embed.add_field(name="Condorcet Verdict", value="No Condorcet winner (cycle detected)", inline=True)
+
 
     # Add footer
     embed.set_footer(text=f"Results for Proposal #{proposal_id} | Calculated at {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
@@ -881,8 +864,12 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
         # NEW: Auto-progression logic for campaign scenarios
         if proposal.get('campaign_id'):
             campaign_id = proposal['campaign_id']
+            guild_id = proposal.get('server_id')
             print(f"DEBUG: Checking for auto-progression in campaign C#{campaign_id} after P#{proposal_id} completed")
-            
+
+            # Try to fetch bot instance and guild for channel operations
+            bot_instance = None
+            guild = None
             try:
                 # Get all proposals for this campaign
                 campaign_proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=guild.id)
@@ -908,9 +895,13 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
                             scenario_proposal_ids=queued_scenario_ids,
                             bot_instance=bot_instance
                         )
-                        
+
                         if success_auto_start:
                             print(f"DEBUG: Successfully auto-started queued scenarios in C#{campaign_id}: {auto_start_msg}")
+                            try:
+                                await _update_campaign_control_panel_auto(campaign_id, bot_instance)
+                            except Exception as e_update:
+                                print(f"ERROR updating campaign control panel for C#{campaign_id}: {e_update}")
                         else:
                             print(f"DEBUG: Failed to auto-start queued scenarios in C#{campaign_id}: {auto_start_msg}")
                             
@@ -918,9 +909,67 @@ async def close_proposal(proposal_id: int) -> Optional[Dict]:
                         print(f"ERROR: Failed to auto-start queued scenarios in C#{campaign_id}: {e_auto_start}")
                         import traceback
                         traceback.print_exc()
+
                 else:
-                    print(f"DEBUG: No queued scenarios found in C#{campaign_id} for auto-progression")
-                    
+                    closed_scenarios = [
+                        p for p in campaign_proposals if p['status'] in ['Closed', 'Passed', 'Failed']
+                    ]
+                    last_processed_order = max(
+                        (p.get('scenario_order') or 0 for p in closed_scenarios), default=0
+                    )
+                    next_order = last_processed_order + 1
+
+                    if campaign and next_order > campaign.get('num_expected_scenarios', 0):
+                        print(f"DEBUG: Campaign C#{campaign_id} has exceeded expected scenarios; marking completed")
+                        await db.update_campaign_status(campaign_id, 'completed')
+                        if guild:
+                            audit_channel = discord.utils.get(guild.text_channels, name='audit-log')
+                            if audit_channel:
+                                await audit_channel.send(
+                                    f"🏁 **Campaign Completed**: C#{campaign_id} ('{campaign.get('title', 'Untitled')}') has concluded all scenarios."
+                                )
+                    else:
+                        scenarios_to_start_ids = [
+                            p['proposal_id']
+                            for p in campaign_proposals
+                            if p.get('scenario_order') == next_order and p['status'] == 'ApprovedScenario'
+                        ]
+
+                        if scenarios_to_start_ids and guild and bot_instance:
+                            print(
+                                f"DEBUG: Auto-starting {len(scenarios_to_start_ids)} scenario(s) for order {next_order} in C#{campaign_id}: {scenarios_to_start_ids}"
+                            )
+                            success_auto_start, auto_start_msg = await initiate_campaign_stage_voting(
+                                guild=guild,
+                                campaign_id=campaign_id,
+                                scenario_proposal_ids=scenarios_to_start_ids,
+                                bot_instance=bot_instance
+                            )
+                            audit_channel = None
+                            if guild:
+                                audit_channel = discord.utils.get(guild.text_channels, name='audit-log')
+
+                            if success_auto_start:
+                                print(
+                                    f"DEBUG: Successfully auto-started scenarios for C#{campaign_id} order {next_order}: {auto_start_msg}"
+                                )
+                                if audit_channel:
+                                    await audit_channel.send(
+                                        f"▶️ **Next Campaign Stage**: Auto-started {len(scenarios_to_start_ids)} scenario(s) for order {next_order} in C#{campaign_id}."
+                                    )
+                            else:
+                                print(
+                                    f"ERROR: Failed to auto-start scenarios for C#{campaign_id} order {next_order}: {auto_start_msg}"
+                                )
+                                if audit_channel:
+                                    await audit_channel.send(
+                                        f"⚠️ **Campaign Stage Start Failed**: Attempted to auto-start scenario(s) for order {next_order} in C#{campaign_id}, but encountered an error."
+                                    )
+                        else:
+                            print(
+                                f"DEBUG: No approved scenarios found for order {next_order} in C#{campaign_id} or missing bot/guild context"
+                            )
+
             except Exception as e_progression:
                 print(f"ERROR: Exception during auto-progression check for C#{campaign_id}: {e_progression}")
                 import traceback
@@ -1263,10 +1312,11 @@ def get_voting_instructions(mechanism, options):
     options_text = ", ".join(
         [f"`{opt}`" for opt in options]) if options else "No options defined."
 
-    if mechanism in ["plurality", "dhondt"]:
+    if mechanism in ["plurality"]:
+
         instructions += f"Format: `!vote <proposal_id> <option>`\nChoose *one* option.\nAvailable options: {options_text}"
 
-    elif mechanism in ["borda", "runoff"]:
+    elif mechanism in ["borda", "runoff", "condorcet"]:
         instructions += f"Format: `!vote <proposal_id> rank option1,option2,...`\nRank the options in order of preference, separated by commas.\nAvailable options: {options_text}"
 
     elif mechanism == "approval":
@@ -1749,3 +1799,131 @@ async def send_batched_campaign_dms(guild: discord.Guild, campaign_id: int, scen
 #     return members
 
 # Ensure other functions like format_vote_results, check_expired_proposals, etc. are below this
+
+
+async def _calculate_campaign_token_stats(campaign_id: int) -> Dict[str, Any]:
+    """Compute token distribution stats for a completed campaign."""
+    stats = {
+        "total_allocated_tokens": 0,
+        "total_invested_tokens": 0,
+        "unused_tokens": 0,
+        "num_enrolled_voters": 0,
+        "num_participants": 0,
+    }
+
+    campaign = await db.get_campaign(campaign_id)
+    if not campaign:
+        return stats
+
+    total_tokens_per_voter = campaign.get("total_tokens_per_voter", 0)
+    enrolled_user_ids = await db.get_enrolled_voter_ids_for_campaign(campaign_id)
+    stats["num_enrolled_voters"] = len(enrolled_user_ids)
+    stats["total_allocated_tokens"] = total_tokens_per_voter * stats["num_enrolled_voters"]
+
+    # Gather all votes across scenarios in this campaign
+    proposals = await db.get_proposals_by_campaign_id(campaign_id)
+    participant_ids = set()
+    for proposal in proposals:
+        votes = await db.get_proposal_votes(proposal["proposal_id"])
+        for vote in votes:
+            tokens = vote.get("tokens_invested") or 0
+            stats["total_invested_tokens"] += tokens
+            participant_ids.add(vote.get("user_id"))
+
+    stats["num_participants"] = len(participant_ids)
+    stats["unused_tokens"] = max(stats["total_allocated_tokens"] - stats["total_invested_tokens"], 0)
+    return stats
+
+
+async def _generate_campaign_completion_summary(campaign: Dict[str, Any], scenarios: List[Dict[str, Any]]) -> discord.Embed:
+    """Build a detailed embed summarizing campaign outcomes and token stats."""
+    campaign_id = campaign.get("campaign_id")
+    token_stats = await _calculate_campaign_token_stats(campaign_id)
+
+    embed = discord.Embed(
+        title=f"Campaign Completed: '{campaign.get('title', 'Untitled')}' (C#{campaign_id})",
+        description=f"All {len(scenarios)} scenario(s) have concluded.",
+        color=discord.Color.gold(),
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    # Scenario outcomes
+    scenario_lines = []
+    sorted_scenarios = sorted(scenarios, key=lambda s: s.get("scenario_order", 0))
+    for sc in sorted_scenarios:
+        result = await db.get_proposal_results(sc["proposal_id"])
+        winner = result.get("winner") if result else None
+        line = f"S#{sc.get('scenario_order')} P#{sc['proposal_id']} - {sc.get('status')}"
+        if winner:
+            line += f" → {winner}"
+        scenario_lines.append(line)
+    if scenario_lines:
+        embed.add_field(name="Scenario Outcomes", value="\n".join(scenario_lines), inline=False)
+
+    # Token statistics
+    token_lines = [
+        f"Allocated: {token_stats['total_allocated_tokens']}",
+        f"Invested: {token_stats['total_invested_tokens']}",
+        f"Unspent: {token_stats['unused_tokens']}",
+        f"Enrolled Voters: {token_stats['num_enrolled_voters']}",
+        f"Participants: {token_stats['num_participants']}"
+    ]
+    embed.add_field(name="Token Stats", value="\n".join(token_lines), inline=False)
+
+    return embed
+
+
+async def _complete_campaign_automatically(campaign_id: int, bot_instance: commands.Bot) -> Tuple[bool, str]:
+    """Finalize a campaign when all scenarios are closed and post a summary."""
+    try:
+        campaign = await db.get_campaign(campaign_id)
+        if not campaign:
+            return False, f"Campaign C#{campaign_id} not found."
+
+        guild = bot_instance.get_guild(campaign["guild_id"])
+        if not guild:
+            return False, f"Guild {campaign['guild_id']} not found."
+
+        scenarios = await db.get_proposals_by_campaign_id(campaign_id, campaign.get("guild_id"))
+        incomplete = [s for s in scenarios if s.get("status") not in ["Closed", "Passed", "Failed"]]
+        if incomplete:
+            return False, f"Campaign C#{campaign_id} has active scenarios."
+
+        await db.update_campaign_status(campaign_id, "completed")
+
+        summary_embed = await _generate_campaign_completion_summary(campaign, scenarios)
+
+        results_channel = discord.utils.get(
+            guild.text_channels, name=CHANNELS.get("results", "governance-results")
+        )
+        if results_channel:
+            await results_channel.send(embed=summary_embed)
+
+        voting_channel = discord.utils.get(
+            guild.text_channels, name=CHANNELS.get("voting_room", "voting-room")
+        )
+        if voting_channel and (not results_channel or voting_channel.id != results_channel.id):
+            await voting_channel.send(
+                f"🏁 **Campaign Completed:** '{campaign.get('title')}' (C#{campaign_id})",
+                embed=summary_embed,
+            )
+
+        audit_channel = discord.utils.get(guild.text_channels, name=CHANNELS.get("audit", "audit-log"))
+        if audit_channel:
+            await audit_channel.send(
+                f"🏁 **Campaign Completed**: C#{campaign_id} ('{campaign.get('title', 'Untitled')}') has concluded."
+            )
+
+        try:
+            from proposals import _update_campaign_control_panel
+
+            await _update_campaign_control_panel(campaign_id, bot_instance)
+        except Exception as e:
+            print(f"ERROR: Unable to update campaign control panel for C#{campaign_id}: {e}")
+
+        return True, f"Campaign C#{campaign_id} marked completed."
+    except Exception as e:
+        print(f"ERROR auto-completing campaign C#{campaign_id}: {e}")
+        traceback.print_exc()
+        return False, f"Failed to complete campaign C#{campaign_id}."
+

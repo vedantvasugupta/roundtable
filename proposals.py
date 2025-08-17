@@ -11,8 +11,8 @@ from typing import List, Optional, Dict, Any, Union
 # Local project imports
 import db
 import utils
-import voting
 import voting_utils
+import voting
 
 # Enable all intents (or specify only the necessary ones)
 intents = discord.Intents.default()
@@ -328,7 +328,7 @@ class ProposalMechanismSelectionView(discord.ui.View):
             ("Borda Count", "borda", "📊"),
             ("Approval Voting", "approval", "👍"),
             ("Runoff Voting", "runoff", "🔄"),
-            ("D'Hondt Method", "dhondt", "⚖️"),
+            ("Condorcet Method", "condorcet", "⚔️"),
         ]
 
         # Add Weighted Campaign creation button ONLY if not already in a campaign definition flow
@@ -405,8 +405,8 @@ class ProposalMechanismSelectionView(discord.ui.View):
             modal = ApprovalProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
         elif mechanism_name == "runoff":
             modal = RunoffProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
-        elif mechanism_name == "dhondt":
-            modal = DHondtProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
+        elif mechanism_name == "condorcet":
+            modal = CondorcetProposalModal(interaction, mechanism_name, campaign_id=self.campaign_id, scenario_order=self.scenario_order, title_prefix=modal_title_prefix)
 
         if modal:
             await interaction.response.send_modal(modal)
@@ -673,8 +673,8 @@ class RunoffProposalModal(BaseProposalModal):
             print(f"Error in RunoffProposalModal on_submit: {e}")
             traceback.print_exc()
             await interaction.followup.send("An error occurred in the Runoff submission.", ephemeral=True)
-
-class DHondtProposalModal(BaseProposalModal):
+ 
+class CondorcetProposalModal(BaseProposalModal):
     def __init__(self, interaction: discord.Interaction, mechanism_name: str, campaign_id: Optional[int] = None, scenario_order: Optional[int] = None, title_prefix: str = "New"):
         super().__init__(interaction, mechanism_name, title_prefix=title_prefix, campaign_id=campaign_id, scenario_order=scenario_order)
         self.allow_abstain_input = discord.ui.TextInput(
@@ -684,13 +684,6 @@ class DHondtProposalModal(BaseProposalModal):
             max_length=3
         )
         self.add_item(self.allow_abstain_input)
-
-        self.num_seats_input = discord.ui.TextInput(
-            label="Number of 'Seats' to Allocate (Winners)",
-            default="1",
-            required=False
-        )
-        self.add_item(self.num_seats_input)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -705,26 +698,11 @@ class DHondtProposalModal(BaseProposalModal):
                 await interaction.followup.send("Invalid input for 'Allow Abstain'. Please use 'yes' or 'no'.", ephemeral=True)
                 return
 
-            num_seats_str = self.num_seats_input.value.strip()
-            if num_seats_str:
-                try:
-                    num_seats = int(num_seats_str)
-                    if num_seats <= 0:
-                        await interaction.response.send_message("Number of seats must be a positive integer.", ephemeral=True)
-                        return
-                    hyperparameters["num_seats"] = num_seats
-                except ValueError:
-                    await interaction.response.send_message("Invalid input for number of seats. Please enter a whole number (e.g., 3).", ephemeral=True)
-                    return
-            else:
-                # Default to 1 seat if not specified, as per the input's default value
-                hyperparameters["num_seats"] = 1
-
             await self.common_on_submit(interaction, hyperparameters)
         except Exception as e:
-            print(f"Error in DHondtProposalModal on_submit: {e}")
+            print(f"Error in CondorcetProposalModal on_submit: {e}")
             traceback.print_exc()
-            await interaction.followup.send("An error occurred in the D'Hondt submission.", ephemeral=True)
+            await interaction.followup.send("An error occurred in the Condorcet submission.", ephemeral=True)
 
 # Helper function to be called by BaseProposalModal (Now _create_new_proposal_entry)
 async def _create_new_proposal_entry(interaction: discord.Interaction, title: str, description: str, mechanism_name: str, options: List[str], deadline_db_str: str, hyperparameters: Optional[Dict[str, Any]] = None, campaign_id: Optional[int] = None, scenario_order: Optional[int] = None) -> Optional[int]:
@@ -1971,4 +1949,114 @@ async def _update_campaign_control_panel(campaign_id: int, bot_instance: command
     except Exception as e:
         print(f"ERROR: Failed to update campaign control panel for C#{campaign_id}: {e}")
         traceback.print_exc()
+
+
+async def _generate_campaign_completion_summary(campaign_id: int) -> Optional[discord.Embed]:
+    """Build an embed summarizing a completed campaign."""
+    try:
+        campaign = await db.get_campaign(campaign_id)
+        if not campaign:
+            return None
+
+        proposals = await db.get_proposals_by_campaign_id(campaign_id, guild_id=campaign["guild_id"])
+        proposals.sort(key=lambda p: p.get("scenario_order", 0))
+
+        embed = discord.Embed(
+            title=f"Campaign Summary: '{campaign['title']}' (C#{campaign_id})",
+            description=campaign.get("description") or "No description provided.",
+            color=discord.Color.gold(),
+        )
+        for proposal in proposals:
+            order = proposal.get("scenario_order", "?")
+            title = proposal.get("title", "Untitled")
+            status = proposal.get("status", "Unknown")
+            embed.add_field(
+                name=f"Scenario S#{order}: {title}",
+                value=f"Status: {status}",
+                inline=False,
+            )
+        return embed
+    except Exception as e:
+        print(f"ERROR: Failed to generate campaign completion summary for C#{campaign_id}: {e}")
+        return None
+
+
+class CampaignCompletionView(discord.ui.View):
+    def __init__(self, campaign_id: int, bot_instance: commands.Bot):
+        super().__init__(timeout=None)
+        self.campaign_id = campaign_id
+        self.bot = bot_instance
+        bot_instance.add_view(self)
+
+        archive_btn = discord.ui.Button(
+            label="Archive Campaign",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"campaign_archive_{campaign_id}",
+            emoji="📦",
+        )
+        archive_btn.callback = self.archive_campaign_callback
+        self.add_item(archive_btn)
+
+        summary_btn = discord.ui.Button(
+            label="View Full Summary",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"campaign_view_summary_{campaign_id}",
+            emoji="📊",
+        )
+        summary_btn.callback = self.view_summary_callback
+        self.add_item(summary_btn)
+
+    async def _user_has_permission(self, interaction: discord.Interaction) -> bool:
+        campaign = await db.get_campaign(self.campaign_id)
+        if not campaign:
+            await interaction.response.send_message("Campaign not found.", ephemeral=True)
+            return False
+        is_creator = interaction.user.id == campaign.get("creator_id")
+        is_admin = interaction.user.guild_permissions.administrator
+        if not (is_creator or is_admin):
+            await interaction.response.send_message("You do not have permission for this action.", ephemeral=True)
+            return False
+        return True
+
+    async def archive_campaign_callback(self, interaction: discord.Interaction):
+        if not await self._user_has_permission(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            success = await db.update_campaign_status(self.campaign_id, "archived")
+            if not success:
+                await interaction.followup.send("Failed to archive campaign.", ephemeral=True)
+                return
+
+            for item in self.children:
+                item.disabled = True
+            try:
+                await interaction.message.edit(view=self)
+            except discord.HTTPException as e:
+                print(f"WARN: Failed to edit message for archiving C#{self.campaign_id}: {e}")
+
+            audit_channel = discord.utils.get(interaction.guild.text_channels, name="audit-log")
+            if audit_channel:
+                await audit_channel.send(
+                    f"📦 **Campaign Archived**: C#{self.campaign_id} archived by {interaction.user.mention}."
+                )
+
+            await interaction.followup.send(f"Campaign C#{self.campaign_id} archived.", ephemeral=True)
+        except Exception as e:
+            print(f"ERROR: Archive campaign action failed for C#{self.campaign_id}: {e}")
+            await interaction.followup.send("An error occurred while archiving the campaign.", ephemeral=True)
+
+    async def view_summary_callback(self, interaction: discord.Interaction):
+        if not await self._user_has_permission(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            embed = await _generate_campaign_completion_summary(self.campaign_id)
+            if not embed:
+                await interaction.followup.send("Could not generate campaign summary.", ephemeral=True)
+                return
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            print(f"ERROR: View summary action failed for C#{self.campaign_id}: {e}")
+            await interaction.followup.send("An error occurred while generating the summary.", ephemeral=True)
 
