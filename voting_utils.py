@@ -86,6 +86,7 @@ class PluralityVoting:
 
         winner = None
         reason_for_no_winner = None
+        winning_threshold_percentage = None
 
         if total_weighted_votes > 0 and sorted_results_detailed:
             top_option_name, top_option_details = sorted_results_detailed[0]
@@ -95,6 +96,7 @@ class PluralityVoting:
             if winning_threshold_config is not None:
                 try:
                     threshold_percentage_value = float(winning_threshold_config)
+                    winning_threshold_percentage = threshold_percentage_value
                     if not (0 <= threshold_percentage_value <= 100):
                         reason_for_no_winner = "Invalid threshold configuration (0-100 required)."
                         # Fallback to simple majority on total_weighted_votes
@@ -143,6 +145,7 @@ class PluralityVoting:
             'winner': winner,
             'total_raw_votes': total_raw_votes,
             'total_weighted_votes': total_weighted_votes,
+            'winning_threshold_percentage': winning_threshold_percentage,
             'reason_for_no_winner': reason_for_no_winner if winner is None else None
         }
 
@@ -662,7 +665,6 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
     print(
         f"DEBUG: Formatting results for proposal #{proposal_id}")
     mechanism = results.get('mechanism', 'Unknown').lower()
-    total_votes_cast = results.get('total_votes', 0)
     color = discord.Color.light_grey()  # Default to grey
 
     embed = discord.Embed(
@@ -673,7 +675,6 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
 
     # Add proposal metadata
     embed.add_field(name="Voting Mechanism", value=mechanism.title(), inline=True)
-    embed.add_field(name="Total Votes", value=str(total_votes_cast), inline=True)
     embed.add_field(name="Abstain Votes", value=str(results.get('num_abstain_votes', 0)), inline=True)
     embed.add_field(name="Tokens in Abstain", value=str(results.get('tokens_in_abstain_votes', 0)), inline=True)
     embed.add_field(name="Options Used", value=", ".join(results.get('options_used_for_tally', [])), inline=False)
@@ -681,12 +682,14 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
     # Add results
     if results.get('winner'):
         embed.add_field(name="Winner", value=results.get('winner'), inline=True)
-        embed.add_field(name="Reason", value=results.get('reason_for_no_winner'), inline=True)
     else:
-        embed.add_field(name="No Winner", value=results.get('reason_for_no_winner'), inline=True)
+        embed.add_field(name="No Winner", value="No option met criteria", inline=True)
+    if results.get('reason_for_no_winner'):
+        embed.add_field(name="Reason", value=results.get('reason_for_no_winner'), inline=True)
 
     # Add mechanism-specific details
     if mechanism == 'plurality':
+        embed.add_field(name="Total Raw Votes", value=str(results.get('total_raw_votes', 0)), inline=True)
         embed.add_field(name="Winning Threshold", value=f"{results.get('winning_threshold_percentage', 'N/A')}% of weighted votes", inline=True)
         embed.add_field(name="Total Weighted Votes", value=str(results.get('total_weighted_votes', 0)), inline=True)
         embed.add_field(name="Vote Counts (Weighted)", value="\n".join([f"• {option}: {details['weighted_votes']:.2f} ({details['raw_votes']} raw)" for option, details in results['results_detailed']]), inline=False)
@@ -702,7 +705,35 @@ async def format_vote_results(results: Dict, proposal: Dict) -> discord.Embed:
         embed.add_field(name="Rounds Conducted", value=str(len(results.get('rounds_detailed', []))), inline=True)
         embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
         embed.add_field(name="Total Weighted Ballot Power", value=str(results.get('total_weighted_ballot_power', 0)), inline=True)
-        embed.add_field(name="Round Details", value="\n".join([f"**Round {round_num}**\n" + round_text for round_num, round_text in enumerate(results['rounds_detailed'], 1)]), inline=False)
+        human_readable_rounds = []
+        for round_index, round_info in enumerate(results.get('rounds_detailed', []), 1):
+            option_lines = []
+            for opt in round_info.get('active_options_in_round', []):
+                w = round_info.get('weighted_votes_per_option', {}).get(opt, 0)
+                r = round_info.get('raw_ballots_per_option', {}).get(opt, 0)
+                option_lines.append(f"{opt}: {w:.2f} ({r} raw)")
+            exhausted = round_info.get('exhausted_ballots_this_round', 0)
+            round_text = "\n".join(option_lines)
+            if exhausted:
+                round_text += f"\nExhausted Ballots: {exhausted}"
+            human_readable_rounds.append(f"**Round {round_index}**\n{round_text}")
+        embed.add_field(name="Round Details", value="\n\n".join(human_readable_rounds) if human_readable_rounds else "No rounds", inline=False)
+    elif mechanism == 'dhondt' or mechanism == "d'hondt":
+        embed.add_field(name="Total Raw Ballots", value=str(results.get('total_raw_ballots', 0)), inline=True)
+        embed.add_field(name="Total Weighted Ballot Power", value=str(results.get('total_weighted_ballot_power', 0)), inline=True)
+        weighted = results.get('party_totals_weighted', {}) or {}
+        raw = results.get('party_totals_raw', {}) or {}
+        seats = results.get('seats_allocated', {}) or {}
+        party_lines = []
+        for party in sorted(set(list(weighted.keys()) + list(raw.keys()))):
+            w = weighted.get(party, 0)
+            r = raw.get(party, 0)
+            s = seats.get(party)
+            line = f"• {party}: {w:.2f} weighted ({r} raw)"
+            if s is not None:
+                line += f", {s} seats"
+            party_lines.append(line)
+        embed.add_field(name="Party Totals", value="\n".join(party_lines) if party_lines else "No data", inline=False)
     elif mechanism == 'condorcet':
         pairwise_matrix = results.get('pairwise_results', {}) or results.get('pairwise_matrix', {})
         pairwise_lines = []
