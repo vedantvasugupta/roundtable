@@ -39,6 +39,14 @@ if TYPE_CHECKING:
 
 
 class PluralityVoting:
+    """Plurality voting where a single option is selected.
+
+    Vote weights follow these rules:
+    - ``tokens`` > 0: weight equals ``tokens``
+    - ``tokens`` == 0: weight is 0 (vote has no effect)
+    - ``tokens`` is ``None``: weight defaults to 1 (non-campaign context)
+    """
+
     @staticmethod
     def count_votes(votes: List[Dict], options: List[str], hyperparameters: Optional[Dict[str, Any]] = None):
         """Counts votes for Plurality voting, considering token investments and hyperparameters."""
@@ -66,9 +74,14 @@ class PluralityVoting:
                 print(f"WARNING: Invalid or missing option in vote_data: {chosen_option}. Valid: {options}. Vote: {vote_record}")
                 continue
 
-            # Get tokens_invested from the main vote_record (it's a direct column now)
+            # Determine vote weight based on tokens_invested
             tokens = vote_record.get('tokens_invested')
-            vote_weight = tokens if tokens is not None and tokens > 0 else 1
+            if tokens is None:
+                vote_weight = 1
+            elif tokens > 0:
+                vote_weight = tokens
+            else:
+                vote_weight = 0
 
             results[chosen_option]['raw_votes'] += 1
             results[chosen_option]['weighted_votes'] += vote_weight
@@ -157,7 +170,13 @@ class PluralityVoting:
 
 
 class BordaCount:
-    """Borda count voting system - gives points based on rankings"""
+    """Borda count voting system assigning points based on rankings.
+
+    Vote weights follow these rules:
+    - ``tokens`` > 0: weight equals ``tokens``
+    - ``tokens`` == 0: weight is 0 (vote has no effect)
+    - ``tokens`` is ``None``: weight defaults to 1 (non-campaign context)
+    """
 
     @staticmethod
     def count_votes(votes: List[Dict], options: List[str], hyperparameters: Optional[Dict[str, Any]] = None):
@@ -184,8 +203,13 @@ class BordaCount:
             if not rankings: # Skip if no valid rankings provided for known options
                 continue
 
-            vote_weight = vote_record.get('tokens_invested', 1) # Default to 1 if no tokens
-            if vote_weight is None or vote_weight < 0: vote_weight = 1 # Ensure positive weight
+            tokens = vote_record.get('tokens_invested')
+            if tokens is None:
+                vote_weight = 1
+            elif tokens > 0:
+                vote_weight = tokens
+            else:
+                vote_weight = 0
 
             total_raw_ranking_sets += 1
             total_weighted_ranking_power += vote_weight
@@ -245,7 +269,13 @@ class BordaCount:
 
 
 class ApprovalVoting:
-    """Approval voting system"""
+    """Approval voting where voters may back multiple options.
+
+    Vote weights follow these rules:
+    - ``tokens`` > 0: weight equals ``tokens``
+    - ``tokens`` == 0: weight is 0 (vote has no effect)
+    - ``tokens`` is ``None``: weight defaults to 1 (non-campaign context)
+    """
 
     @staticmethod
     def count_votes(votes: List[Dict], options: List[str], hyperparameters: Optional[Dict[str, Any]] = None):
@@ -270,8 +300,13 @@ class ApprovalVoting:
             if not approved_options_by_voter: # Skip if voter approved no valid options
                 continue
 
-            vote_weight = vote_record.get('tokens_invested', 1)
-            if vote_weight is None or vote_weight < 0: vote_weight = 1
+            tokens = vote_record.get('tokens_invested')
+            if tokens is None:
+                vote_weight = 1
+            elif tokens > 0:
+                vote_weight = tokens
+            else:
+                vote_weight = 0
 
             total_raw_voters += 1
             total_weighted_voting_power += vote_weight
@@ -326,7 +361,13 @@ class ApprovalVoting:
 
 
 class RunoffVoting:
-    """Instant runoff voting system"""
+    """Instant runoff voting where ranked choices are evaluated in rounds.
+
+    Vote weights follow these rules:
+    - ``tokens`` > 0: weight equals ``tokens``
+    - ``tokens`` == 0: weight is 0 (vote has no effect)
+    - ``tokens`` is ``None``: weight defaults to 1 (non-campaign context)
+    """
 
     @staticmethod
     def count_votes(votes: List[Dict], options: List[str], hyperparameters: Optional[Dict[str, Any]] = None):
@@ -350,8 +391,13 @@ class RunoffVoting:
             if not current_rankings:
                 continue # Voter ranked no valid options
 
-            vote_weight = vote_record.get('tokens_invested', 1)
-            if vote_weight is None or vote_weight < 0: vote_weight = 1
+            tokens = vote_record.get('tokens_invested')
+            if tokens is None:
+                vote_weight = 1
+            elif tokens > 0:
+                vote_weight = tokens
+            else:
+                vote_weight = 0
 
             processed_ballots.append({'original_rankings': list(current_rankings), 'current_rankings': list(current_rankings), 'weight': vote_weight, 'exhausted': False})
 
