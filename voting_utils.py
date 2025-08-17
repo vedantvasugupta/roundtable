@@ -633,12 +633,20 @@ async def calculate_results(proposal_id: int) -> Optional[Dict]:
             elif results_summary.get('reason_for_no_winner'):
                 final_status = "Failed"  # Generic fail if no winner and not a specific tie
             else:
-                total_weighted = (
-                    results_summary.get('total_weighted_votes')
-                    or results_summary.get('total_weighted_vote_power')
-                    or results_summary.get('total_weighted_ballot_power')
-                    or 0
-                )
+                # Map each mechanism to its corresponding total-weight field
+                total_weight_field_map = {
+                    'plurality': 'total_weighted_votes',
+                    'borda': 'total_weighted_vote_power',
+                    "dhondt": 'total_weighted_vote_power',
+                    "d'hondt": 'total_weighted_vote_power',
+                    "d’hondt": 'total_weighted_vote_power',
+                    'approval': 'total_weighted_voting_power',
+                    'runoff': 'total_weighted_ballot_power',
+                }
+                mechanism = results_summary.get('mechanism', '').lower()
+                total_field = total_weight_field_map.get(mechanism, 'total_weighted_votes')
+                total_weighted = results_summary.get(total_field, 0)
+
                 if total_weighted == 0 and num_abstain_votes == 0:
                     final_status = "No Votes"
                 elif total_weighted == 0 and num_abstain_votes > 0:
